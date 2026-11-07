@@ -1,0 +1,20 @@
+name: vibe-relay
+version: 0.2.1
+description: >
+  Vibecoding without burning your best model: quota-aware self vs cheap executor
+  delegation, gate-bound acceptance, park/resume across usage-window resets, and
+  an Agent Workshop skill pack for building and running long-lived agents.
+author: trenthalden
+homepage: https://github.com/trenthalden/vibe-relay
+requires_hermes: ">=0.22.5"
+provides_tools:
+  - vibe_accept
+  - df_init
+  - df_check
+  - df_nav
+provides_hooks:
+  - pre_llm_call
+  - api_request_error
+  - post_tool_call
+  - pre_verify
+  - subagent_stop

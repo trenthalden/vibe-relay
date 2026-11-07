@@ -1,0 +1,19 @@
+S2_OK
+{
+  "valid_hooks_include": [
+    "pre_verify",
+    "subagent_stop",
+    "api_request_error",
+    "pre_llm_call",
+    "post_tool_call"
+  ],
+  "get_pre_verify_continue_message_sig": "(*, session_id: 'str' = '', platform: 'str' = '', model: 'str' = '', coding: 'bool' = False, attempt: 'int' = 0, final_response: 'str' = '', changed_paths: 'Optional[list[str]]' = None) -> 'Optional[str]'",
+  "doc": "Check ``pre_verify`` hooks for ``{\"action\": \"continue\", \"message\"}`` (or Claude-Code Stop\n``{\"decision\": \"block\", \"reason\"}``) to keep the turn going; first non-empty message wins, any\nother return lets the turn finish. ``coding``/``attempt`` let hooks scope and self-throttle.",
+  "hooks_py_pre_verify_block": "\"pre_verify\": {\n        \"session_id\": \"test-session\", \"platform\": \"cli\", \"model\": \"gpt-4\", \"coding\": True,\n        \"attempt\": 0, \"final_response\": \"All done \u2014 the change is applied.\",\n        \"changed_paths\": [\"src/app.tsx\"],\n    },\n    \"on_session_start\": {\"session_id\": \"test-session\"},\n    \"on_session_end\": {\n        \"session_id\": \"test-session\", \"task_id\": \"test-task\", \"turn_id\": \"test-turn\",\n        \"completed\": True, \"failed\": False, \"interrupted\": False,\n        \"turn_exit_reason\": \"text_r",
+  "continue_return": {
+    "action": "continue",
+    "message": "continue: run the gate"
+  },
+  "fires": "After verify-on-stop when agent edited code this turn; requires >=1 pre_verify hook.",
+  "subagent_stop_fallback": "Observer-only (return ignored). Cannot issue continue. Useful to note child completion; gate enforcement stays on parent pre_verify + post_tool_call capture."
+}

@@ -1,0 +1,20 @@
+S3_OK
+{
+  "dispatch_tool": "(self, tool_name: 'str', args: 'dict', **kwargs) -> 'str'",
+  "tool_name": "cronjob_manage",
+  "create_example": {
+    "action": "create",
+    "name": "vibe-relay-resume",
+    "schedule": "2026-12-01T10:05:00",
+    "prompt": "Resume from handoff\u2026",
+    "repeat": 1
+  },
+  "iso_once": {
+    "kind": "once",
+    "run_at": "2026-12-01T10:00:00+02:00",
+    "display": "once at 2026-12-01 10:00"
+  },
+  "in_once_kind": "once",
+  "blueprint": "(self, key: 'str', *, title: 'str', description: 'str', schedule_template: 'str', prompt_template: 'str', category: 'str' = 'general', slots: 'Iterable[Any]' = (), deliver_default: 'str' = 'origin', skills: 'Iterable[str]' = (), tags: 'Iterable[str]' = ()) -> 'Optional[PluginRegistration]'",
+  "blueprint_api": "ctx.register_automation_blueprint(key, title=..., description=..., schedule_template=..., prompt_template=...)"
+}

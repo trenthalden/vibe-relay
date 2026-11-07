@@ -1,0 +1,32 @@
+S1_OK
+{
+  "task_parameters": [
+    "lane",
+    "allowed",
+    "gate"
+  ],
+  "route_keys": [
+    "api_key",
+    "api_mode",
+    "base_url",
+    "fallback_providers",
+    "label",
+    "model",
+    "profile",
+    "provider",
+    "reasoning_effort",
+    "request_overrides",
+    "service_tier"
+  ],
+  "refuse": "allowed and gate required",
+  "executor_route": {
+    "provider": "openrouter",
+    "model": "google/gemini-2.5-flash",
+    "label": "executor"
+  },
+  "self_route": {
+    "label": "self"
+  },
+  "routing_to_other_model": "yes via provider+model (or profile). cursor-acp is a model provider plugin selected as provider slug if installed.",
+  "requires_hermes_floor": ">=0.22.5 (advanced-delegation catalog: first release with pluggable delegation providers)"
+}

@@ -1,0 +1,51 @@
+---
+name: df-import
+description: Install the DEV Framework into a repository (new or existing) with the df_init tool, fill the project facts from the code, and prove readiness with df_check. Use when the operator says "import the framework", "install DEV Framework", "set up the project docs", "внедри фреймворк", "поставь правила в проект".
+version: 0.4.0
+---
+
+# df-import — put a repository under the DEV Framework
+
+Outcome: the repository has the project context files, `PROJECT.md`, the `docs/` set (use-case catalogue,
+known errors, backlog, requirements, architecture …) and the verification gates, and `df_check doctor`
+says READY. The documents are true, not decoration: no `TODO(project)` left, facts taken from the code.
+
+## Procedure (tools first, files second)
+
+1. **Facts you need before writing anything** — ask one question per message, only what was not given:
+   the name (what the operator calls it); the **kind** (`product` — software with users that will grow, full
+   documents and tests; `tool` — a script for one job, user guide `docs/GUIDE.html` and proof by running it on
+   examples; `explore` — not known yet, the minimum, promote later); for a product only, the scale target (integer +
+   unit, e.g. `100 users` — never invent it); and **devlog** yes/no (default no; local-only in public repositories).
+   Profile is `generic` unless told otherwise. Kind, scale and devlog are the operator's decisions.
+2. `df_init(target, name, scale)` — one call: previews, installs, reports the files laid in. On an existing
+   repository it refuses to overwrite a foreign context file; read the message and decide with the operator.
+3. `df_nav(target, "contract")` once — it tells you exactly what doctor and finish will demand.
+4. Fill, from the code (read it) and from the operator (ask):
+   `PROJECT.md` (stack, file map, data, environments, commands) and `docs/ARCHITECTURE.md` — until no
+   `TODO(project):` remains; `.devframework/project.json` — real build/test commands in argv form
+   (`{python}` expands to the interpreter; `.devframework/run_unittest.py --start tests` is the built-in
+   counted runner). Replace the example requirement and the example use cases with the agreed product;
+   every user-visible capability is a `#### UC-### — title` with a `**Test:**` field and a traceability row.
+5. `df_check(target, "hostcheck")` — rules in the operator's profile (SOUL, CLAUDE.md, always-read skills) that
+   fight the framework, with quotes and a fix each. Show the operator the list **once** and ask for one decision per
+   line (replace the host rule, or keep it). With authorization edit the host file (backup first) and record every
+   decision in `PROJECT.md` → `## Host precedence` as `- <class>@<file>: replaced <date> | kept — <reason>`.
+   Doctor keeps warning about any collision without a recorded line — also for rules added later.
+   The decision is the operator's: never record `kept` or `replaced` on your own, even when told not to ask questions —
+   this is the one question the framework requires (one message, all collisions, proposed fix per line).
+6. `df_check(target, "doctor")` → fix what it lists → `df_check(target, "finish")` once tests exist.
+   `finish` needs a Git repository; initialise one if the operator agreed.
+7. Report in numbers: files created, cases written (covered / gap), doctor and finish results, what remains
+   unconfirmed for the operator.
+
+## Rules that survive shortcuts
+
+- A statement in a document is either read out of the code or marked unconfirmed for the operator.
+- Do not write a full catalogue from imagination on import; write what the product agreed to do.
+- Tests use temporary fixtures, never a real profile, database, token or live service.
+- Independent steps run in parallel subagents when the host provides them; work beyond one iteration gets one checklist (`df_nav checklist`) copied at the end of every reply. Reply shape, exact headings: `🛠️ Tech` then `💬 Message` ending with the explicit ask; if your profile wants its own plain-language footer, the Message is that footer (one block, not two).
+- Your host profile decides tone; this skill decides only the project's gates.
+
+Why every rule exists, the incidents behind them and the long form of this procedure:
+`references/full.md` (read on first use of the framework, not on every project).

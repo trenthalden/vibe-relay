@@ -1,0 +1,14 @@
+- `agent-build-debug-loop`: Use when building or debugging long-lived agents.
+- `agent-architecture-audit`: Use when auditing agent layers before blaming the model.
+- `agent-harness-design`: Use when designing agent tools, cron, or eval harnesses.
+- `context-budget-audit`: Use when auditing agent context or token bloat.
+- `memory-engineering`: Use when engineering agent memory or retrieval.
+- `known-errors`: Use when reading or appending a known-errors registry.
+- `frozen-working-tree-review`: Use when reviewing a frozen working tree read-only.
+- `product-aware-engineering-releases`: Use when product decisions require safe release splitting.
+- `subagent-driven-development`: Use when executing plans via reviewed subagent tasks.
+- `agent-maintenance`: Use when maintaining a long-lived companion agent.
+- `lean-executor-orchestration`: Use when delegating code. Dispatch once; accept receipt.
+- `agent-field-acceptance`: Use when proving agent work with field-first acceptance.
+- `test-driven-development`: Use when testing code or agents. Choose minimal evidence.
+- `systematic-debugging`: Use when debugging. Find root cause before fixing.

@@ -1,0 +1,118 @@
+# Known errors — DEV Framework
+
+## KE-2026-08-31-FINISH-EVIDENCE — success without test or snapshot evidence
+
+- Found in uncommitted v0.2 second review. check.py accepted unittest's successful zero-test
+  exit and tested a fixed working copy while the staged source still contained a defect.
+- Status: fixed in v0.2. Simplified 2026-09-23: the runner prints one `TESTS:` line and finish fails
+  on zero executed tests (tests/test_gates.py); the snapshot digest and index parity were removed.
+
+## KE-2026-08-31-SECRET-FORMATS — common literals missed, OAuth metadata flagged
+
+- Found in uncommitted v0.2 second review. secrets_check.py missed unquoted dotenv/YAML
+  and C# verbatim values, but flagged token_type and token_endpoint ordinary metadata.
+- Status: fixed in uncommitted v0.2 hardening; SecretFormatTests covers the named formats
+  and false positives with synthetic data; broader heuristic limitations remain below.
+
+## KE-2026-08-31-TRANSFER-COVERAGE — important source lessons absent
+
+- Existing lesson/recipe links worked but did not establish completeness. Original tray
+  exit guard bypass and UI/SQL performance lessons had no explicit transferable recipes.
+- Status: named gaps fixed in uncommitted v0.2 hardening; 24-row transfer map, eight recipes
+  and invariant register. Map explicitly names source selections and unreviewed material;
+  not a claim that all historical implementations are portable or correct.
+
+## KE-2026-08-31-SCALE — custom scale retained 10k totals
+
+- Introduced: c48cf74; detected: 2026-08-31 review.
+- Where: template/AGENTS.md cost example, installer substitution.
+- Impact: 50k deployment estimate understated requests fivefold; 5k overstated twofold.
+- Cause: string substitution changed the label, not the calculated totals.
+- Status: fixed in v0.2.0 working tree, not yet committed/accepted.
+- Verification: test_scale_math_three_sizes verifies 5k/10k/50k expected totals.
+
+## KE-2026-08-31-KNOWLEDGE — lessons absent from installed projects
+
+- Introduced: c48cf74; detected: 2026-08-31 review.
+- Impact: provider/project switch loses rationale; the the source project outbox incident was omitted.
+- Status: fixed in v0.2.0 working tree, not yet committed/accepted.
+- Verification: installed lesson bytes equal the canonical source; outbox and all five
+  local recipe links are tested in generated projects.
+
+## KE-2026-08-31-UPGRADE — no non-destructive upgrade protocol
+
+- Introduced: c48cf74; detected: 2026-08-31 review.
+- Impact: skip leaves old rules; Force overwrites project adaptation without a backup.
+- Status: fixed in v0.2.0 working tree, not yet committed/accepted.
+- Verification: forced replacement retains exact original bytes; project-owned docs are
+  preserved; conflicts/no-op updates, interruption, later-edit refusal and OS lock tested.
+
+## KE-2026-09-03-USECASE-PADDED-RANGE — unique headings, phantom citations
+
+- Found: agent map vs USE_CASES.md (calendar/tasks via API; replica has neither). SET-018
+  cited UC-155 and UC-173, which were never written.
+- Cause: catalogue generated in one pass; Enables used round ranges; Flow merged the
+  replica safety slogan with `/api/*`. Doctor only checked heading uniqueness.
+- Status: doctor requires USE_CASES.md and expands SET Enables and Preconditions against
+  headings/rows; it also requires unique headings, a Test field and a traceability row.
+  Flow which-store claims stay a review item. Source project `doc_drift.py` gets the same ID
+  check.
+- Verification: test_use_case_enables_range_must_have_headings,
+  test_use_case_precondition_set_must_exist, test_use_case_missing_test_field,
+  test_use_case_missing_traceability_row, test_use_case_duplicate_heading.
+
+## Explicit v0.2 boundaries (not silently claimed as covered)
+
+- Staged secret detection is a text heuristic. Non-text files are reported, history and
+  built artifacts are not inspected. No claim of exhaustive absence of credentials.
+- Doctor checks the stated document/config contract, including the use-case catalogue
+  in required USE_CASES.md. It does not judge schema/API semantic drift or whether a
+  Flow names the correct store.
+- Finish runs reviewed project commands, not a sandbox. Timeout does not guarantee that
+  detached descendants are stopped; test process ownership remains a project concern.
+- Installer protects normal local edits and blocks unsafe paths. It does not defend
+  against malicious concurrent filesystem replacement. A multi-file update is not atomic:
+  an interrupted run is repeated; replaced files stay in .devframework/backups/.
+- Native handoff pilot is blocked: Claude OAuth expired; Codex read commands denied by
+  machine policy; Cursor agent unavailable in inspected CLI. See the evidence report.
+  Hosted CI has since run: on 24 September 2026 the workflow for `9efa0d7` was green on
+  Windows and Ubuntu, Python 3.10 and 3.13. That does not close the native handoff pilot.
+
+## KE-2026-09-24-DEVLOG-SCAN — local Devlog failed the package checks
+
+- Found: 24 September 2026. `doctor` and `scripts/verify.py` treated `docs/devlog/` as product
+  documentation. A local, git-ignored dialogue log with old links failed both checks.
+- Status: fixed in 1.6.1.
+- Verification: `tests/test_gates.py`, `test_a_local_devlog_is_not_product_documentation`.
+  A broken link in a normal doc is still an error. The configured Devlog directory is not.
+
+## KE-2026-10-02-CURSOR-SESSIONSTART — Cursor may drop the session-start brief
+
+- Found: 2 October 2026, while planning the Cursor adapter. Cursor runs the `sessionStart` hook before
+  the agent window is ready; users report `additional_context` "merged" in the log but absent from the
+  model's context (forum.cursor.com threads 157141, 158452; also on Windows when `bash` resolves to WSL).
+- Impact: the brief may not arrive by itself in Cursor.
+- Defence: the hook calls `python` directly (no bash), and `AGENTS.md` §0, which Cursor reads natively,
+  tells the agent to run `navigate.py brief` first. No always-apply plugin rule: it would cost tokens in
+  every project without the framework. Add one only if a live session shows the agent skipping §0.
+- Status: open (host defect). Live result per Cursor version is recorded in HOSTS_PLAN §4.
+
+## KE-2026-10-02-CONSOLE-ENCODING — install.py --help crashed on a cp1251 console
+
+- Found: 2 October 2026, installing into KnowledgeBase through the Claude Code plugin (Windows, Russian locale,
+  output captured by a pipe). `print_help` raised `UnicodeEncodeError` on `→` in the `--kind` help.
+- Cause: `install.py` kept the locale encoding with `errors=strict`; `check.py`, `navigate.py` and `hostcheck.py`
+  already switched stdout to UTF-8.
+- Status: fixed (Unreleased). `install.py` reconfigures stdout/stderr to UTF-8 with replacement.
+- Verification: `tests/test_install.py`, `test_help_does_not_crash_on_a_non_utf8_console` runs `--help` of
+  install, check, navigate and hostcheck under `PYTHONIOENCODING=cp1251`; it fails with the fix removed.
+
+## KE-2026-10-02-SECRET-STANDINS — finish blocked by placeholder keys in quoted READMEs
+
+- Found: 2 October 2026 in KnowledgeBase: 23 SECRET SUSPECT in 11 `clips/**` notes, all documentation
+  stand-ins (`your-exa-key`, `sk-...`, `***`, `"your-api-key"`, `max_tokens: 4096`). The notes keep third-party
+  READMEs verbatim, so they cannot be edited, and `finish` never reached the tests.
+- Status: fixed (Unreleased). Stand-ins are recognised; `secret_scan.exclude` removes paths from the worktree
+  scan only, named on every run; the staged scan before a commit still covers them.
+- Verification: `tests/test_gates.py`, `test_documentation_stand_ins_pass_and_an_excluded_path_is_named`
+  (stand-ins → 0 suspects, real-shaped key caught, exclusion named, commit-check still fails, `**` refused).
