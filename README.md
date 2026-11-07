@@ -1,5 +1,11 @@
 # vibe-relay
 
+![vibe-relay](assets/banner.png)
+
+[▶ Demo video (≈40 s)](assets/demo.mp4) — real tool handlers running in an isolated Hermes home.
+
+![demo](assets/shot-2.png)
+
 Vibecoding without burning your best model: a Hermes delegation backend that routes coding work to yourself when quota remains, or to a cheap executor when it does not — and only counts work done after a green gate on the real diff, parking itself across usage-window resets.
 
 ## 30-second quickstart
