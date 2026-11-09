@@ -66,8 +66,23 @@ def _on_pre_verify(changed_paths=None, coding=False, **kwargs):
         return None
 
 
+def _on_subagent_start(**kwargs):
+    """Track live child ids so executor-lane enforcement never blocks the child."""
+    try:
+        from executor_lane import note_child_start
+        note_child_start(**kwargs)
+    except Exception as exc:
+        logger.debug("vibe-relay subagent_start: %s", exc)
+    return None
+
+
 def _on_subagent_stop(**kwargs):
     """Observer fallback: record child completion; cannot issue continue."""
+    try:
+        from executor_lane import note_child_stop
+        note_child_stop(**kwargs)
+    except Exception as exc:
+        logger.debug("vibe-relay subagent_stop (lane): %s", exc)
     try:
         from state import update_state
         update_state(
@@ -80,6 +95,23 @@ def _on_subagent_stop(**kwargs):
     except Exception as exc:
         logger.debug("vibe-relay subagent_stop: %s", exc)
     return None
+
+
+def _on_pre_tool_call(tool_name="", args=None, task_id="", session_id="", **kwargs):
+    """Block parent file writes when vibe-relay routes the parent to the executor lane."""
+    try:
+        from executor_lane import pre_tool_call_directive
+        return pre_tool_call_directive(
+            tool_name=tool_name,
+            args=args or {},
+            task_id=task_id,
+            session_id=session_id,
+            **kwargs,
+        )
+    except Exception as exc:
+        # Visible: a silent fail-open here is exactly the R4 defect (parent patches itself).
+        logger.warning("vibe-relay pre_tool_call failed open: %s", exc)
+        return None
 
 
 # Agent Workshop skill pack (W3b). df-* stay under skills/ for host discovery but are
@@ -151,9 +183,15 @@ def register(ctx) -> None:
 
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("api_request_error", _on_api_request_error)
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("pre_verify", _on_pre_verify)
+    ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
+    logger.info(
+        "vibe-relay: hooks registered (pre_tool_call executor-lane enforce=%s)",
+        True,
+    )
 
     def _cmd(raw_args: str = "", **kwargs):
         return vibe_command(raw_args, ctx=ctx)

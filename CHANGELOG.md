@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4
+
+- Enforce the cheap-executor lane: when vibe-relay is the active backend and routing selects executor (`auto` with remaining ≤ threshold, or `policy=executor-always`), a `pre_tool_call` hook blocks the **parent** from `patch` / `write_file` and from terminal commands that obviously write (`sed -i`, `>` / `>>`, `tee`). Children are never blocked. Config: `delegation.backends.vibe-relay.enforce_executor_lane` (default `true`).
+- Registers `pre_tool_call` + `subagent_start` (child id tracking) alongside existing hooks.
+
 ## 0.2.3
 
 - Live-demo hardening: `delegate_task` schema/description and `lean-executor-orchestration` skill now steer the parent to route coding fixes with required `allowed` + `gate` (then `vibe_accept`) instead of editing in-parent.

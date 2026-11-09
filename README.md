@@ -44,7 +44,7 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 | Slash | `/vibe` | Quota, mode, last gate, pending park |
 | Slash | `/vibe park` | Handoff + one-shot cron at reset+buffer (clears prior pending_park) |
 | Blueprint | `resume-after-reset` | Manual catalog twin of the park resume job |
-| Hooks | `pre_llm_call`, `api_request_error`, `post_tool_call`, `pre_verify`, `subagent_stop` | Quota context; observe exhaustion; capture gate; continue if no PASS |
+| Hooks | `pre_llm_call`, `api_request_error`, `pre_tool_call`, `post_tool_call`, `pre_verify`, `subagent_start`, `subagent_stop` | Quota context; enforce executor lane; capture gate; track children |
 
 ## Configuration (`delegation.backends.vibe-relay`)
 
@@ -57,6 +57,18 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 | `executor_profile` | — | Or run child as another Hermes profile |
 | `park_buffer_seconds` | `120` | Delay after `reset_at` before resume cron |
 | `quota_provider` | active model provider | Passed to `fetch_account_usage(..., read_only=True)` |
+| `enforce_executor_lane` | `true` | When vibe-relay is active and routing selects **executor**, block the **parent** from writing files itself (see below) |
+
+### Executor-lane enforcement (`enforce_executor_lane`)
+
+When enabled (default) **and** vibe-relay is `delegation.backend` **and** the parent’s auto routing decision is `executor` (`policy=executor-always`, or `auto` with remaining ≤ `self_remaining_threshold`):
+
+- **Blocked for the parent:** `patch`, `write_file`, and terminal commands that *obviously* write files — `sed -i` / `sed --in-place`, shell `>` / `>>` redirection, and `tee`. Kept deliberately conservative (other writers are not scanned).
+- **Still allowed for the parent:** reads, `delegate_task`, `vibe_accept`, and gate/test commands (`unittest` / `pytest` / `git status|diff`, etc.).
+- **Never blocked:** delegate children (tracked via `subagent_start` / `subagent_stop`, plus the `HERMES_DELEGATED_CHILD_CONTEXT` env marker).
+- **Off / inactive:** set `enforce_executor_lane: false`, switch `delegation.backend` away from vibe-relay, or stay on the parent lane (high remaining under `auto`) — parent writes proceed as usual.
+
+Block message shape: `vibe-relay: quota is low (N% left) — route this edit through delegate_task with allowed + gate; the cheap executor will make it.`
 
 ## Data & network disclosure
 
@@ -107,8 +119,8 @@ Before this plugin existed, the author ran the same loop by hand for 15 days (23
 ## Limitations
 
 - Live executor quality and real provider quota endpoints need a signed-in profile (see `OPEN` in `RECEIPT.md`).
-- `pre_verify` nudges the **parent** turn that edited code; subagent edits are observed via `subagent_stop` + gate capture on `terminal`.
-- Cooperative workflow: path checks detect out-of-scope writes after the fact; they do not sandbox the executor.
+- `pre_verify` nudges the **parent** turn that edited code; with `enforce_executor_lane` the parent should not be editing in executor mode (child edits are observed via `subagent_stop` + gate capture on `terminal`).
+- Cooperative workflow: path checks detect out-of-scope writes after the fact; they do not sandbox the executor. Executor-lane enforcement blocks only the listed parent write shapes — not every possible write vector.
 
 ## License
 

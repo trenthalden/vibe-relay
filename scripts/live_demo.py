@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""R3 live demo harness for vibe-relay (disposable vrdemo profile + toy repo).
+"""R4 live demo harness for vibe-relay (disposable vrdemo profile + toy repo).
 
-Creates a fresh toy git repo, runs one real Hermes parent turn that should
-delegate via vibe-relay to a cheap executor, grades the result, and records a
-scripted out-of-scope REJECT case. Outputs land under out/live-demo/ (gitignored).
+Creates a fresh toy git repo under ``/tmp/vr-demo-<ts>`` (not under $HOME — the
+path can appear on camera), runs one real Hermes parent turn that should
+delegate via vibe-relay to a cheap executor (parent file writes blocked by
+``enforce_executor_lane``), grades the result, and records a scripted
+out-of-scope REJECT case. Outputs land under out/live-demo/ (gitignored).
 
-Paths are derived from $HOME / $HERMES_HOME — never hard-code owner paths other
-than the disposable profile name ``vrdemo`` required by the brief.
+Paths are derived from $HOME / $HERMES_HOME / /tmp — never hard-code owner paths
+other than the disposable profile name ``vrdemo`` required by the brief.
 """
 from __future__ import annotations
 
@@ -27,8 +29,7 @@ PLUGIN_NAME = "vibe-relay"
 ALLOWED_GLOBS = "textutil/**"
 GATE_CMD = "python -m unittest discover -s tests -v"
 POSITIVE_PROMPT = (
-    "The slugify tests fail. Fix it so the unit tests pass. "
-    "Only touch textutil/ — nothing else."
+    "The slugify tests fail. Fix it, only touch textutil/, and the unit tests must pass."
 )
 NEGATIVE_ALLOWED = "textutil/**"
 
@@ -203,6 +204,16 @@ def ensure_plugin_symlink() -> Path:
     return link
 
 
+def reload_plugin_into_gateway() -> None:
+    """Chat -Q runs inside the long-lived host gateway, which keeps in-memory plugin
+    code until reloaded. Disable→enable nudges ``reload-plugins`` so ``pre_tool_call``
+    from the symlink is what the next turn actually runs.
+    """
+    env = hermes_env()
+    run(hermes_cmd("plugins", "disable", PLUGIN_NAME), env=env, check=False)
+    run(hermes_cmd("plugins", "enable", PLUGIN_NAME), env=env, check=False)
+
+
 def configure_backend(*, policy: str) -> None:
     env = hermes_env()
     pairs = [
@@ -210,6 +221,7 @@ def configure_backend(*, policy: str) -> None:
         ("delegation.backends.vibe-relay.executor_provider", "anthropic"),
         ("delegation.backends.vibe-relay.executor_model", "claude-haiku-4-5"),
         ("delegation.backends.vibe-relay.policy", policy),
+        ("delegation.backends.vibe-relay.enforce_executor_lane", "true"),
         ("delegation.subagent_auto_approve", "true"),
         # Disposable demo profile only: non-TTY -Q must run unittest/git without prompts.
         ("approvals.mode", "off"),
@@ -447,6 +459,32 @@ def stream_mentions(stream_text: str, *needles: str) -> bool:
     return all(n.lower() in low for n in needles)
 
 
+def parent_tool_uses(stream_text: str) -> List[str]:
+    """Names of top-level stream-json ``tool_use`` events (parent turn only)."""
+    names: List[str] = []
+    for line in stream_text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if str(ev.get("type") or "") != "tool_use":
+            continue
+        name = str(ev.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def parent_block_seen(stream_text: str) -> bool:
+    return bool(
+        re.search(r"vibe-relay:\s*quota is low", stream_text, flags=re.I)
+        or re.search(r"route this edit through\s+delegate_task", stream_text, flags=re.I)
+    )
+
+
 def grade_positive(
     *,
     toy: Path,
@@ -478,14 +516,28 @@ def grade_positive(
     executor_lane = lane == "executor" or "executor" in reason or stream_mentions(
         stream, "executor"
     )
+    parent_tools = parent_tool_uses(stream)
+    parent_write_names = [n for n in parent_tools if n in {"patch", "write_file"}]
+    parent_write_blocked = parent_block_seen(stream)
+    # Top-level tool_use of patch/write_file is a parent attempt. Nested child
+    # writes live inside the delegate_task result and do not emit parent tool_use.
+    parent_edit_ok = (not parent_write_names) or parent_write_blocked
+    haiku = stream_mentions(stream, "claude-haiku-4-5") or stream_mentions(
+        stream, '"model": "claude-haiku-4-5"'
+    )
     checks = {
         "tests_pass": gate_pass,
         "diff_subseteq_allowed": gate_pass and not outside and bool(changed),
         "executor_lane": executor_lane or lane == "executor",
+        "executor_haiku": haiku,
         "accept_verdict": accept_hit,
-        "delegate_called": stream_mentions(stream, "delegate_task")
+        "delegate_called": "delegate_task" in parent_tools
+        or stream_mentions(stream, "delegate_task")
         or bool(last_route.get("goal"))
         or bool(last_route.get("allowed")),
+        "parent_edit_blocked_or_absent": parent_edit_ok,
+        "parent_write_tools": parent_write_names,
+        "parent_write_blocked_seen": parent_write_blocked,
     }
     # If tests pass and paths ok but changed empty (committed?), treat carefully
     if gate_pass and not changed:
@@ -497,7 +549,10 @@ def grade_positive(
             checks["tests_pass"],
             checks["diff_subseteq_allowed"],
             checks["executor_lane"],
+            checks["executor_haiku"],
+            checks["delegate_called"],
             checks["accept_verdict"],
+            checks["parent_edit_blocked_or_absent"],
         ]
     )
     return {
@@ -635,10 +690,11 @@ def write_recording_md(
     hermes = str(hermes_bin()).replace(str(Path.home()), "$HOME")
     elapsed = grade.get("elapsed_seconds")
     path.write_text(
-        f"""# vibe-relay live demo — recording sheet (R3)
+        f"""# vibe-relay live demo — recording sheet (R4)
 
 Disposable profile: **vrdemo**. Cheap executor: `anthropic` / `claude-haiku-4-5`.
 Routing policy used: **`{policy}`** — {policy_reason}.
+Executor-lane enforcement: **on** (`enforce_executor_lane=true`) — parent cannot `patch`/`write_file` itself.
 
 ## One-time setup (hide this noise off-camera)
 
@@ -650,11 +706,12 @@ $HERMES -p vrdemo config set delegation.backend vibe-relay
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.executor_provider anthropic
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.executor_model claude-haiku-4-5
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.policy {policy}
-# toy repo (or reuse):
+$HERMES -p vrdemo config set delegation.backends.vibe-relay.enforce_executor_lane true
+# toy repo lives under /tmp (not $HOME) so the path is camera-safe:
 TOY={toy_disp}
 ```
 
-Optional helper (creates a fresh toy + prints the chat command):
+Optional helper (creates a fresh `/tmp/vr-demo-<ts>` toy + prints the chat command):
 
 ```bash
 python scripts/live_demo.py --setup-only
@@ -667,7 +724,7 @@ Expected wall time: **~{elapsed or 90}–180 s** for the successful chat turn (p
 ```bash
 export HERMES_HOME={desktop}
 cd "$TOY"
-$HERMES -p vrdemo chat -Q -q "The slugify unit tests are failing. Fix the bug so all tests pass. Only touch files under textutil/." --in "$TOY"
+$HERMES -p vrdemo chat -Q -q "The slugify tests fail. Fix it, only touch textutil/, and the unit tests must pass." --in "$TOY"
 ```
 
 Optional status beat before the fix (≈5 s):
@@ -678,9 +735,9 @@ $HERMES -p vrdemo chat -Q -q "/vibe" --in "$TOY"
 
 ## What to show / say
 
-1. `/vibe` or the chat start — policy `{policy}`, executor haiku.
-2. Parent calls `delegate_task` with `allowed=textutil/**` and the unittest gate.
-3. Child label shows **executor** (reason from quota/policy).
+1. `/vibe` or the chat start — policy `{policy}`, executor haiku, remaining quota.
+2. If the parent tries `patch`/`write_file`, the tool error shows the vibe-relay executor-lane block; otherwise it goes straight to `delegate_task`.
+3. Parent calls `delegate_task` with `allowed=textutil/**` and the unittest gate; child = **claude-haiku-4-5**.
 4. Gate goes RED→GREEN; `vibe_accept` prints **ACCEPT**.
 5. Honesty line if policy is `executor-always`: remaining quota would have preferred self under `auto`.
 
@@ -694,19 +751,22 @@ Scripted out-of-scope README edit → `vibe_accept` **REJECT** (see `out/live-de
 
 def print_verdict_table(grade: Dict[str, Any], negative: Dict[str, Any]) -> None:
     checks = grade.get("checks") or {}
+    print("\n=== R4 VERDICT TABLE ===")
+    print(f"{'check':<28} {'result'}")
+    print("-" * 42)
     rows = [
         ("tests_pass", checks.get("tests_pass")),
         ("diff ⊆ allowed", checks.get("diff_subseteq_allowed")),
         ("executor_lane", checks.get("executor_lane")),
+        ("executor_haiku", checks.get("executor_haiku")),
+        ("delegate_called", checks.get("delegate_called")),
+        ("parent_edit blocked/absent", checks.get("parent_edit_blocked_or_absent")),
         ("accept ACCEPT", checks.get("accept_verdict")),
         ("overall", grade.get("verdict")),
         ("negative REJECT", negative.get("verdict")),
     ]
-    print("\n=== R3 VERDICT TABLE ===")
-    print(f"{'check':<22} {'result'}")
-    print("-" * 36)
     for name, val in rows:
-        print(f"{name:<22} {val}")
+        print(f"{name:<28} {val}")
     print(f"policy: {grade.get('policy')} ({grade.get('policy_reason')})")
     print(f"lane: {grade.get('lane')} — {grade.get('route_reason')}")
     print(f"files: {grade.get('changed_files')}")
@@ -731,6 +791,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     run_dir.mkdir(parents=True)
 
     ensure_plugin_symlink()
+    # Drop stale last_route / last_accept from a prior demo so grading is not polluted.
+    state_path = profile_home() / "plugin-data" / PLUGIN_NAME / "state.json"
+    if state_path.exists():
+        try:
+            state_path.write_text("{}\n", encoding="utf-8")
+        except OSError:
+            pass
     usage = read_usage()
     write_json(run_dir / "usage.json", usage)
     if args.policy:
@@ -738,6 +805,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     else:
         policy, policy_reason = choose_policy(usage)
     configure_backend(policy=policy)
+    reload_plugin_into_gateway()
     write_json(
         run_dir / "config_snapshot.json",
         {
@@ -747,6 +815,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "executor_provider": "anthropic",
             "executor_model": "claude-haiku-4-5",
             "profile": PROFILE,
+            "enforce_executor_lane": True,
+            "gateway_plugin_reloaded": True,
         },
     )
 
@@ -754,7 +824,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.toy:
         toy = Path(args.toy).expanduser().resolve()
     else:
-        toy = profile_home() / "cache" / f"toy-{ts}"
+        # Brief R4: under /tmp (camera-safe), never under $HOME.
+        toy = Path("/tmp") / f"vr-demo-{ts}"
         create_toy_repo(toy)
     write_json(run_dir / "toy_path.json", {"toy": str(toy)})
 

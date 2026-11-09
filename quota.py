@@ -182,4 +182,6 @@ def settings_from_delegation(config: Optional[dict] = None) -> Dict[str, Any]:
         "executor_profile": own.get("executor_profile"),
         "park_buffer_seconds": int(own.get("park_buffer_seconds", 120)),
         "quota_provider": own.get("quota_provider"),
+        # When true (default), parent file writes are blocked if routing selects the executor lane.
+        "enforce_executor_lane": own.get("enforce_executor_lane", True),
     }
