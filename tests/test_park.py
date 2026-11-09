@@ -42,6 +42,7 @@ class ParkTests(IsolatedHomeTest):
         self.assertEqual(calls[0][1]["action"], "create")
         self.assertEqual(calls[0][1]["schedule"], expected)
         self.assertEqual(calls[0][1].get("repeat"), 1)
+        self.assertEqual(calls[0][1].get("workdir"), str(repo.resolve()))
         handoff = repo / "docs" / "vibe-park.md"
         self.assertTrue(handoff.is_file())
         self.assertIn("pause here", handoff.read_text(encoding="utf-8"))

@@ -44,7 +44,7 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 | Slash | `/vibe` | Quota, mode, last gate, pending park |
 | Slash | `/vibe park` | Handoff + one-shot cron at reset+buffer (clears prior pending_park) |
 | Blueprint | `resume-after-reset` | Manual catalog twin of the park resume job |
-| Hooks | `pre_llm_call`, `api_request_error`, `pre_tool_call`, `post_tool_call`, `pre_verify`, `subagent_start`, `subagent_stop` | Quota context; enforce executor lane; capture gate; track children |
+| Hooks | `pre_llm_call`, `api_request_error`, `pre_tool_call`, `post_tool_call`, `pre_verify`, `subagent_start`, `subagent_stop` | Quota + stop context; enforce stop/park + executor lane; capture gate; track children |
 
 ## Configuration (`delegation.backends.vibe-relay`)
 
@@ -52,16 +52,32 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 |---|---|---|
 | `policy` | `auto` | `auto` or `executor-always` |
 | `self_remaining_threshold` | `51` | Remaining % above which `auto` stays on self |
-| `stop_used_percent` | `90` | Used % that flags park |
+| `stop_used_percent` | `90` | Used % that **enforces stop + auto-park** (see below) |
 | `executor_provider` / `executor_model` | — | Cheap executor route |
 | `executor_profile` | — | Or run child as another Hermes profile |
 | `park_buffer_seconds` | `120` | Delay after `reset_at` before resume cron |
 | `quota_provider` | active model provider | Passed to `fetch_account_usage(..., read_only=True)` |
 | `enforce_executor_lane` | `true` | When vibe-relay is active and routing selects **executor**, block the **parent** from writing files itself (see below) |
 
+### Stop-at-threshold + auto park (`stop_used_percent`)
+
+When vibe-relay is `delegation.backend` **and** routing says `should_park` (account used ≥ `stop_used_percent`, default **90**, or exhausted):
+
+- **Blocked for the parent:** `delegate_task`, `patch`, `write_file`, and the same conservative terminal writers as executor-lane (`sed -i`, `>` / `>>`, `tee`).
+- **Still allowed:** reads, `vibe_accept`, gate/test commands (`unittest` / `pytest` / `python .devframework/check.py …` / `git status|diff`).
+- **Never blocked:** delegate children.
+- **Auto-park (once per reset window):** on the first blocked call, write the handoff and create **exactly one** one-shot cron via `park()` at `reset_at + park_buffer_seconds`. Repeated blocks / turns in the same window do **not** create more cron jobs (**cost: 1 cron job per reset window**).
+- **Context:** `pre_llm_call` adds `parked until …; do not start new work`.
+- **Lifts automatically** when used drops below stop, or wall-clock passes `reset_at`.
+- Manual `/vibe park` still works and always schedules a fresh job.
+
+Block message shape: `vibe-relay: quota used N% ≥ stop M% — work parked; resume scheduled at <local time> (reset + buffer).`
+
+Demo without waiting for the real reset: `hermes cron run <job_id>` (LIVE Hermes CLI).
+
 ### Executor-lane enforcement (`enforce_executor_lane`)
 
-When enabled (default) **and** vibe-relay is `delegation.backend` **and** the parent’s auto routing decision is `executor` (`policy=executor-always`, or `auto` with remaining ≤ `self_remaining_threshold`):
+When enabled (default) **and** vibe-relay is `delegation.backend` **and** the parent’s auto routing decision is `executor` (`policy=executor-always`, or `auto` with remaining ≤ `self_remaining_threshold`) **and** stop is not already active:
 
 - **Blocked for the parent:** `patch`, `write_file`, and terminal commands that *obviously* write files — `sed -i` / `sed --in-place`, shell `>` / `>>` redirection, and `tee`. Kept deliberately conservative (other writers are not scanned).
 - **Still allowed for the parent:** reads, `delegate_task`, `vibe_accept`, and gate/test commands (`unittest` / `pytest` / `git status|diff`, etc.).
@@ -72,7 +88,7 @@ Block message shape: `vibe-relay: quota is low (N% left) — route this edit thr
 
 ## Data & network disclosure
 
-- **Network:** only through Hermes `agent.account_usage.fetch_account_usage(provider, read_only=True)` (at most once per 180 s, cached under plugin storage). No direct credential file reads, no xAI/grok-cli paths.
+- **Network:** only through Hermes `agent.account_usage.fetch_account_usage(provider, read_only=True)` (usable snapshots cached ≤ 180 s under plugin storage; empty/failed fetches use a 15 s negative TTL and may fall back to in-process `agent.account_usage_cache.cached_account_usage`). No direct credential file reads, no xAI/grok-cli paths.
 - **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `agent.runtime_cwd.resolve_agent_cwd()`); optional handoff write under the target repo’s `docs/`.
 - **Local child processes:**
   - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree) and protected `$HOME` dot-folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`).

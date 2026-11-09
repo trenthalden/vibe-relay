@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 from state import load_state, update_state
+from tool_args import as_dict, coerce_tool_args
 
 PASS_PATTERNS = (
     re.compile(r"FINISH PASSED", re.I),
@@ -126,7 +127,7 @@ def capture_terminal_gate(
     cwd: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """If terminal output looks like a gate PASS/FAIL, bind it to the tree hash."""
-    args = args or {}
+    args = coerce_tool_args(args)
     result = result or ""
     cmd = str(args.get("command") or args.get("cmd") or "")
     if not looks_like_pass(result) and "FINISH" not in result.upper() and "passed" not in result.lower():
@@ -146,7 +147,7 @@ def capture_terminal_gate(
 
 
 def fresh_pass_for_tree(cwd: Optional[str] = None) -> bool:
-    gate = load_state().get("last_gate") or {}
+    gate = as_dict(load_state().get("last_gate"))
     if not gate.get("passed"):
         return False
     return gate.get("tree_hash") == working_tree_hash(cwd)
@@ -172,6 +173,7 @@ def pre_verify_directive(
 
 def vibe_accept(args: dict, **kwargs) -> str:
     """Compare changed paths to allowed globs; report accept/reject with reasons."""
+    args = coerce_tool_args(args)
     explicit = args.get("cwd") or args.get("workdir")
     cwd = str(explicit) if explicit else None
     allowed_raw = args.get("allowed") or load_state().get("last_allowed") or ""
@@ -191,7 +193,9 @@ def vibe_accept(args: dict, **kwargs) -> str:
         else:
             outside.append(e)
 
-    gate = load_state().get("last_gate") or {}
+    # last_gate must be the PASS record dict; a bare string is the delegate gate
+    # command (legacy / provider bug) and must not crash .get().
+    gate = as_dict(load_state().get("last_gate"))
     tree = working_tree_hash(cwd)
     gate_ok = bool(gate.get("passed") and gate.get("tree_hash") == tree)
     lines = [

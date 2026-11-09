@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""R4 live demo harness for vibe-relay (disposable vrdemo profile + toy repo).
+"""R5 live demo harness for vibe-relay (disposable vrdemo profile + toy repo).
 
 Creates a fresh toy git repo under ``/tmp/vr-demo-<ts>`` (not under $HOME — the
-path can appear on camera), runs one real Hermes parent turn that should
-delegate via vibe-relay to a cheap executor (parent file writes blocked by
-``enforce_executor_lane``), grades the result, and records a scripted
-out-of-scope REJECT case. Outputs land under out/live-demo/ (gitignored).
+path can appear on camera), initialises the vendored DEV Framework via real
+``df_init``, runs one real Hermes parent turn that should delegate via
+vibe-relay to a cheap executor (parent file writes blocked by
+``enforce_executor_lane``; stop-at-threshold auto-parks), grades the result,
+and records a scripted out-of-scope REJECT case. Outputs land under
+out/live-demo/ (gitignored).
 
 Paths are derived from $HOME / $HERMES_HOME / /tmp — never hard-code owner paths
 other than the disposable profile name ``vrdemo`` required by the brief.
@@ -27,9 +29,13 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 PROFILE = "vrdemo"
 PLUGIN_NAME = "vibe-relay"
 ALLOWED_GLOBS = "textutil/**"
-GATE_CMD = "python -m unittest discover -s tests -v"
+# DEV Framework finish gate (project.json test = toy unittest via run_unittest.py).
+GATE_CMD = "python .devframework/check.py finish"
 POSITIVE_PROMPT = (
-    "The slugify tests fail. Fix it, only touch textutil/, and the unit tests must pass."
+    "The slugify tests fail. Fix it via delegate_task with allowed=[\"textutil/**\"] "
+    "and gate=\"python .devframework/check.py finish\". Only touch textutil/. "
+    "The DEV Framework finish gate must FAIL before the fix and PASS after. "
+    "Then call vibe_accept."
 )
 NEGATIVE_ALLOWED = "textutil/**"
 
@@ -115,7 +121,73 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _fill_project_md(dest: Path) -> None:
+    """Replace TODO(project) markers so DF doctor is READY (explore kind)."""
+    path = dest / "PROJECT.md"
+    text = path.read_text(encoding="utf-8")
+    replacements = {
+        "TODO(project): what you are trying out, what is still unknown, and what would tell you that it works.": (
+            "Demo explore: fix `textutil.slugify` so the unit tests pass. "
+            "Done means `python .devframework/check.py finish` prints FINISH PASSED."
+        ),
+        "TODO(project): map the source areas, tests and consumers of shared code.": (
+            "`textutil/` is the only editable package; `tests/` holds unittest; "
+            "`.devframework/` is the vendored DEV Framework gate (do not edit in the task)."
+        ),
+        "TODO(project): list settings/database/log locations and isolated test locations, or N/A.": (
+            "N/A — no databases or credentials; disposable toy under /tmp."
+        ),
+        "TODO(project): configure build/test commands in .devframework/project.json; document\n"
+        "output locations and any process locks. A build never authorizes relaunch or deployment.": (
+            "Test command in `.devframework/project.json` runs the toy unittest suite via "
+            "`.devframework/run_unittest.py`. No build. Gate: `python .devframework/check.py finish`."
+        ),
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    if "TODO(project)" in text:
+        # Fallback: strip any remaining markers so doctor is ready.
+        text = text.replace("TODO(project):", "")
+    path.write_text(text, encoding="utf-8")
+
+
+def init_dev_framework(dest: Path) -> Dict[str, Any]:
+    """Initialise DEV Framework via the real vendored ``df_init`` tool path (not a copy-paste)."""
+    vendor = str(repo_root() / "vendor")
+    if vendor not in sys.path:
+        sys.path.insert(0, vendor)
+    import dev_framework as df  # noqa: WPS433 — real tool module
+
+    target = str(Path(dest).expanduser().resolve())
+    out = df.df_init(
+        {
+            "target": target,
+            "name": "toy-slugify",
+            "kind": "explore",
+            "scale": "1 user",
+            "profile": "generic",
+        }
+    )
+    if not str(out).startswith("INIT OK"):
+        raise SystemExit(f"df_init failed:\n{out}")
+    _fill_project_md(dest)
+    pj_path = dest / ".devframework" / "project.json"
+    pj = json.loads(pj_path.read_text(encoding="utf-8"))
+    # Toy unittest suite, counted for finish via run_unittest.py (prints TESTS: …).
+    pj["commands"]["test"] = [
+        "{python}",
+        "-B",
+        ".devframework/run_unittest.py",
+        "--start",
+        "tests",
+    ]
+    pj_path.write_text(json.dumps(pj, indent=2) + "\n", encoding="utf-8")
+    return {"df_init": out, "test_command": pj["commands"]["test"], "gate": GATE_CMD}
+
+
 def create_toy_repo(dest: Path) -> Path:
+    # macOS: /tmp → /private/tmp symlink; vendored df_init rejects symlink ancestors.
+    dest = Path(dest).expanduser().resolve()
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -167,23 +239,30 @@ def create_toy_repo(dest: Path) -> Path:
         encoding="utf-8",
     )
     (dest / "README.md").write_text(
-        "# toy-slugify\n\nTiny package used by the vibe-relay live demo. `textutil.slugify` starts broken.\n",
+        "# toy-slugify\n\nTiny package used by the vibe-relay live demo. `textutil.slugify` starts broken.\n"
+        "Gate: `python .devframework/check.py finish` (DEV Framework; test = unittest).\n",
         encoding="utf-8",
     )
-    (dest / ".gitignore").write_text("__pycache__/\n*.py[cod]\n.pytest_cache/\n", encoding="utf-8")
+    (dest / ".gitignore").write_text(
+        "__pycache__/\n*.py[cod]\n.pytest_cache/\n.devframework/last_run.log\n",
+        encoding="utf-8",
+    )
     run(["git", "init"], cwd=dest)
     run(["git", "config", "user.email", "demo@example.com"], cwd=dest)
     run(["git", "config", "user.name", "vibe-relay demo"], cwd=dest)
     run(["git", "add", "-A"], cwd=dest)
     run(["git", "commit", "-m", "chore: broken slugify baseline for live demo"], cwd=dest)
-    # Prove RED
-    red = run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
-        cwd=dest,
-        check=False,
-    )
+
+    # Real vendored df_init path (not a scaffold copy-paste).
+    init_dev_framework(dest)
+    run(["git", "add", "-A"], cwd=dest)
+    run(["git", "commit", "-m", "chore: DEV Framework gate (df_init) for live demo"], cwd=dest)
+
+    # Prove DF finish RED before the fix (unittest failures → finish FAIL).
+    # Do not leave evidence files in the toy tree — they would pollute allowed diffs.
+    red = run_gate(dest)
     if red.returncode == 0:
-        raise SystemExit("toy repo unexpectedly GREEN before the fix")
+        raise SystemExit("toy DF finish unexpectedly GREEN before the fix")
     return dest
 
 
@@ -222,6 +301,7 @@ def configure_backend(*, policy: str) -> None:
         ("delegation.backends.vibe-relay.executor_model", "claude-haiku-4-5"),
         ("delegation.backends.vibe-relay.policy", policy),
         ("delegation.backends.vibe-relay.enforce_executor_lane", "true"),
+        ("delegation.backends.vibe-relay.stop_used_percent", "90"),
         ("delegation.subagent_auto_approve", "true"),
         # Disposable demo profile only: non-TTY -Q must run unittest/git without prompts.
         ("approvals.mode", "off"),
@@ -304,6 +384,52 @@ def load_plugin_state() -> Dict[str, Any]:
         return {}
 
 
+def seed_plugin_quota(usage: Dict[str, Any]) -> None:
+    """Write a usable quota snapshot into plugin state so stop/routing see used%.
+
+    ``hermes usage`` can succeed while in-process ``fetch_account_usage`` returns
+    no snapshot inside a gateway chat; seeding keeps should_park honest for demos.
+    """
+    path = profile_home() / "plugin-data" / PLUGIN_NAME / "state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except json.JSONDecodeError:
+        state = {}
+    used = usage.get("used_percent")
+    rem = usage.get("remaining_percent")
+    if used is None and rem is not None:
+        used = 100.0 - float(rem)
+    if used is None:
+        return
+    # Prefer a future ISO reset so park() can schedule; fall back to +4h.
+    from datetime import timedelta
+
+    reset = (datetime.now(timezone.utc) + timedelta(hours=4)).isoformat()
+    raw = usage.get("raw")
+    if isinstance(raw, dict):
+        for w in raw.get("windows") or []:
+            if isinstance(w, dict) and w.get("reset_at"):
+                reset = str(w["reset_at"])
+                break
+    state["quota"] = {
+        "provider": "anthropic",
+        "available": True,
+        "windows": [
+            {
+                "label": "account",
+                "used_percent": float(used),
+                "reset_at": reset,
+                "scope": "account",
+            }
+        ],
+        "cache_fetched_at": time.time(),
+        "from_cache": False,
+        "seeded_from": usage.get("source") or "live_demo",
+    }
+    path.write_text(json.dumps(state, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def git_diff_names(cwd: Path) -> List[str]:
     cp = run(["git", "diff", "--name-only", "HEAD"], cwd=cwd, check=False)
     names = [ln.strip() for ln in (cp.stdout or "").splitlines() if ln.strip()]
@@ -335,8 +461,9 @@ def path_allowed(path: str, globs: Sequence[str]) -> bool:
 
 
 def run_gate(cwd: Path) -> subprocess.CompletedProcess:
+    """DEV Framework finish gate (same command the agent must pass)."""
     return run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"],
+        [sys.executable, ".devframework/check.py", "finish"],
         cwd=cwd,
         check=False,
     )
@@ -690,60 +817,104 @@ def write_recording_md(
     hermes = str(hermes_bin()).replace(str(Path.home()), "$HOME")
     elapsed = grade.get("elapsed_seconds")
     path.write_text(
-        f"""# vibe-relay live demo — recording sheet (R4)
+        f"""# vibe-relay live demo — recording sheet (R5)
 
 Disposable profile: **vrdemo**. Cheap executor: `anthropic` / `claude-haiku-4-5`.
 Routing policy used: **`{policy}`** — {policy_reason}.
-Executor-lane enforcement: **on** (`enforce_executor_lane=true`) — parent cannot `patch`/`write_file` itself.
+Executor-lane enforcement: **on**. Stop-at-threshold + auto-park: **on** (`stop_used_percent`, default 90).
+Toy gate: **`python .devframework/check.py finish`** (DEV Framework; test = unittest).
+
+Target wall time on camera: **~60 s** of terminal (cut pauses). Full chat turns are longer off-cut.
 
 ## One-time setup (hide this noise off-camera)
 
 ```bash
 export HERMES_HOME={desktop}
 HERMES={hermes}
-# plugin already symlinked + enabled in vrdemo; re-apply config if needed:
+# Always reload the plugin into the gateway before a live chat (stale in-memory code voids the demo):
+$HERMES -p vrdemo plugins disable vibe-relay
+$HERMES -p vrdemo plugins enable vibe-relay
 $HERMES -p vrdemo config set delegation.backend vibe-relay
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.executor_provider anthropic
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.executor_model claude-haiku-4-5
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.policy {policy}
 $HERMES -p vrdemo config set delegation.backends.vibe-relay.enforce_executor_lane true
-# toy repo lives under /tmp (not $HOME) so the path is camera-safe:
+$HERMES -p vrdemo config set delegation.backends.vibe-relay.stop_used_percent 90
+# toy under /tmp (camera-safe):
 TOY={toy_disp}
+# Or: python scripts/live_demo.py --setup-only
 ```
 
-Optional helper (creates a fresh `/tmp/vr-demo-<ts>` toy + prints the chat command):
+## On-camera sequence (~60 s terminal)
 
-```bash
-python scripts/live_demo.py --setup-only
-```
-
-## On-camera (1–2 commands)
-
-Expected wall time: **~{elapsed or 90}–180 s** for the successful chat turn (parent sonnet + haiku executor + unittest gate).
+### 1. Status (quota, lane, stop%)
 
 ```bash
 export HERMES_HOME={desktop}
 cd "$TOY"
-$HERMES -p vrdemo chat -Q -q "The slugify tests fail. Fix it, only touch textutil/, and the unit tests must pass." --in "$TOY"
-```
-
-Optional status beat before the fix (≈5 s):
-
-```bash
 $HERMES -p vrdemo chat -Q -q "/vibe" --in "$TOY"
 ```
 
-## What to show / say
+Expect: windows + used/remaining, policy, `stop≥90%`, pending park `(none)`.
 
-1. `/vibe` or the chat start — policy `{policy}`, executor haiku, remaining quota.
-2. If the parent tries `patch`/`write_file`, the tool error shows the vibe-relay executor-lane block; otherwise it goes straight to `delegate_task`.
-3. Parent calls `delegate_task` with `allowed=textutil/**` and the unittest gate; child = **claude-haiku-4-5**.
-4. Gate goes RED→GREEN; `vibe_accept` prints **ACCEPT**.
-5. Honesty line if policy is `executor-always`: remaining quota would have preferred self under `auto`.
+### 2. Task → delegate → DF gate FAIL→PASS → vibe_accept ACCEPT
+
+```bash
+$HERMES -p vrdemo chat -Q -q "The slugify tests fail. Fix it via delegate_task with allowed=[\\"textutil/**\\"] and gate=\\"python .devframework/check.py finish\\". Only touch textutil/. The DEV Framework finish gate must FAIL before the fix and PASS after. Then call vibe_accept." --in "$TOY"
+```
+
+Expect (~{elapsed or 90}–180 s wall; cut to highlights): `delegate_task` → haiku executor → finish FAIL then PASS → `vibe_accept` **ACCEPT**.
+
+### 3. Lower stop below current usage → next request stopped + auto-parked
+
+Read current used% from `/vibe` or `hermes -p vrdemo usage`. Set stop just below it (example: used 66% → stop 50):
+
+```bash
+$HERMES -p vrdemo config set delegation.backends.vibe-relay.stop_used_percent 50
+$HERMES -p vrdemo plugins disable vibe-relay && $HERMES -p vrdemo plugins enable vibe-relay
+$HERMES -p vrdemo chat -Q -q "Continue: add a docstring-only tweak via delegate_task." --in "$TOY"
+```
+
+Expect: tool error `vibe-relay: quota used N% ≥ stop M% — work parked; resume scheduled at <local time>…`; handoff under `docs/vibe-park.md`; **one** cron job.
+
+```bash
+$HERMES -p vrdemo cron list
+```
+
+Show the `vibe-relay-resume-after-reset` line (schedule = real reset + buffer).
+
+### 4. Trigger the job now (supported CLI) → resumed session continues
+
+LIVE Hermes supports an immediate trigger:
+
+- CLI parser: `hermes_cli/subcommands/cron.py` L196–198 (`hermes cron run <job_id>`)
+- Handler: `hermes_cli/cron.py` `_job_action` L876–908 / wired at L1028
+
+```bash
+JOB=$( $HERMES -p vrdemo cron list | awk '/vibe-relay-resume-after-reset/ {{print $1}}' | head -1 )
+$HERMES -p vrdemo cron run "$JOB"
+```
+
+Expect: session reads the handoff and re-runs the DF gate / continues parked work.
+
+### 5. Restore stop_used_percent afterwards
+
+```bash
+$HERMES -p vrdemo config set delegation.backends.vibe-relay.stop_used_percent 90
+$HERMES -p vrdemo plugins disable vibe-relay && $HERMES -p vrdemo plugins enable vibe-relay
+```
+
+## What to say
+
+1. `/vibe` — quota, lane, stop%.
+2. Coding work goes to haiku via `delegate_task`; parent cannot write when the executor lane is on.
+3. Gate is DEV Framework **finish**, not bare unittest — FAIL before, PASS after; ACCEPT needs that PASS.
+4. Lower stop → auto-park once (one cron); `hermes cron run` fires it now without waiting for the real reset.
+5. Restore stop to 90 when done.
 
 ## Negative (off-camera / cutaway)
 
-Scripted out-of-scope README edit → `vibe_accept` **REJECT** (see `out/live-demo/run-*/negative_verdict.json`). Labeled scripted — not a second live model spend.
+Scripted out-of-scope README edit → `vibe_accept` **REJECT** (see `out/live-demo/run-*/negative_verdict.json`). Labeled scripted — not a live model spend.
 """,
         encoding="utf-8",
     )
@@ -751,7 +922,7 @@ Scripted out-of-scope README edit → `vibe_accept` **REJECT** (see `out/live-de
 
 def print_verdict_table(grade: Dict[str, Any], negative: Dict[str, Any]) -> None:
     checks = grade.get("checks") or {}
-    print("\n=== R4 VERDICT TABLE ===")
+    print("\n=== R5 VERDICT TABLE ===")
     print(f"{'check':<28} {'result'}")
     print("-" * 42)
     rows = [
@@ -800,12 +971,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             pass
     usage = read_usage()
     write_json(run_dir / "usage.json", usage)
+    seed_plugin_quota(usage)
     if args.policy:
         policy, policy_reason = args.policy, f"forced via --policy {args.policy}"
     else:
         policy, policy_reason = choose_policy(usage)
     configure_backend(policy=policy)
     reload_plugin_into_gateway()
+    # Re-seed after reload/clear so the gateway session sees used% for stop/routing.
+    seed_plugin_quota(usage)
     write_json(
         run_dir / "config_snapshot.json",
         {
@@ -824,8 +998,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.toy:
         toy = Path(args.toy).expanduser().resolve()
     else:
-        # Brief R4: under /tmp (camera-safe), never under $HOME.
-        toy = Path("/tmp") / f"vr-demo-{ts}"
+        # Brief: under /tmp/vr-demo-* (camera-safe). Resolve for macOS /tmp symlink
+        # so vendored df_init (no symlink ancestors) can install.
+        toy = (Path("/tmp") / f"vr-demo-{ts}").resolve()
         create_toy_repo(toy)
     write_json(run_dir / "toy_path.json", {"toy": str(toy)})
 

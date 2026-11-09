@@ -213,7 +213,12 @@ def is_blocked_parent_write(tool_name: str, args: Optional[Mapping[str, Any]] = 
     if name in _WRITE_TOOLS:
         return True
     if name in _TERMINAL_TOOLS:
-        args = args or {}
+        try:
+            from tool_args import coerce_tool_args
+
+            args = coerce_tool_args(args)
+        except Exception:
+            args = dict(args) if isinstance(args, Mapping) else {}
         command = args.get("command")
         if command is None:
             command = args.get("cmd")

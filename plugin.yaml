@@ -1,9 +1,10 @@
 name: vibe-relay
-version: 0.2.4
+version: 0.3.1
 description: >
   Vibecoding without burning your best model: quota-aware self vs cheap executor
-  delegation, gate-bound acceptance, park/resume across usage-window resets, and
-  an Agent Workshop skill pack for building and running long-lived agents.
+  delegation, gate-bound acceptance, enforced stop-at-threshold with auto
+  park/resume across usage-window resets, and an Agent Workshop skill pack for
+  building and running long-lived agents.
 author: trenthalden
 homepage: https://github.com/trenthalden/vibe-relay
 requires_hermes: ">=0.22.5"

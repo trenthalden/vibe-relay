@@ -161,7 +161,24 @@ def _refuse_df_init_target(target: Path) -> str | None:
 
 # ---------------------------------------------------------------- tools
 
+def _coerce_args(args) -> dict:
+    """Tolerate JSON-string args from deferred ``tool_call`` bridges."""
+    if args is None:
+        return {}
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, str):
+        import json as _json
+        try:
+            parsed = _json.loads(args.strip() or "{}")
+        except (_json.JSONDecodeError, TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
 def df_init(args: dict, **kwargs) -> str:
+    args = _coerce_args(args)
     target = _path(args.get("target", ""))
     refusal = _refuse_df_init_target(target)
     if refusal:
@@ -201,6 +218,7 @@ def df_check(args: dict, **kwargs) -> str:
     (or any other gate subprocess). Normal Hermes terminal approvals apply when the
     agent runs the returned command.
     """
+    args = _coerce_args(args)
     target = _path(args.get("target", ""))
     mode = (args.get("mode") or "doctor").strip()
     devframework = _framework_dir(target)
@@ -228,6 +246,7 @@ def df_check(args: dict, **kwargs) -> str:
 
 def df_nav(args: dict, **kwargs) -> str:
     """Run the plugin's vendored navigate.py against ``target`` — never the target's copy."""
+    args = _coerce_args(args)
     target = _path(args.get("target", ""))
     command = (args.get("command") or "brief").strip()
     if _framework_dir(target) is None:

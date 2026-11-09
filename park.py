@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional
 
 from quota import earliest_reset_at, get_quota, settings_from_delegation
 from state import load_state, update_state
+from tool_args import as_dict
 
 DispatchFn = Callable[[str, dict], str]
 
@@ -69,8 +70,15 @@ def park(
     reset_at: Optional[str] = None,
     buffer_seconds: Optional[int] = None,
     ctx: Any = None,
+    auto: bool = False,
 ) -> str:
-    """Write handoff and create exactly ONE one-shot cron job at reset_at + buffer."""
+    """Write handoff and create exactly ONE one-shot cron job at reset_at + buffer.
+
+    ``auto=True`` (stop-threshold path): idempotent per reset window — if an
+    auto-park already exists for the same ``reset_at``, return SKIPPED without
+    creating another cron job. Manual ``/vibe park`` keeps ``auto=False`` and
+    always schedules a fresh job.
+    """
     root = Path(repo).expanduser().resolve()
     usage = get_quota()
     settings = settings_from_delegation(_delegation_config())
@@ -80,9 +88,24 @@ def park(
     buf = int(buffer_seconds if buffer_seconds is not None else settings.get("park_buffer_seconds", 120))
     when = schedule_iso(str(reset), buf)
 
+    if auto:
+        existing = load_state().get("pending_park") or {}
+        if (
+            isinstance(existing, dict)
+            and existing.get("auto")
+            and str(existing.get("reset_at") or "") == str(reset)
+            and existing.get("job_id")
+        ):
+            return (
+                f"PARK SKIPPED (already auto-parked for reset {reset})\n"
+                f"handoff: {existing.get('handoff')}\n"
+                f"cron: one-shot at {existing.get('schedule')}\n"
+                f"job_id: {existing.get('job_id')}"
+            )
+
     handoff_note = note or (
         f"Quota window nearly exhausted. Resume after reset ({reset}).\n"
-        f"Last gate: {json.dumps(load_state().get('last_gate') or {}, default=str)}\n"
+        f"Last gate: {json.dumps(as_dict(load_state().get('last_gate')), default=str)}\n"
         f"Last route: {json.dumps(load_state().get('last_route') or {}, default=str)}\n"
         "Re-read this handoff, check /vibe status, then continue the open task."
     )
@@ -102,6 +125,8 @@ def park(
         "schedule": when,
         "prompt": prompt,
         "repeat": 1,
+        # Pin the resume session to the parked repo (not the gateway process cwd).
+        "workdir": str(root),
     }
 
     dispatcher = dispatch
@@ -124,6 +149,7 @@ def park(
         "handoff": str(handoff_path),
         "create_args": args,
         "dispatch_result": (result_text or "")[:1000],
+        "auto": bool(auto),
     }
     update_state(pending_park=record)
     return (
@@ -169,15 +195,19 @@ def status_text() -> str:
     route = state.get("last_route") or {}
     if route:
         lines.append(f"last route: {route.get('lane')} — {route.get('reason')}")
-    gate = state.get("last_gate") or {}
+    gate = as_dict(state.get("last_gate"))
     if gate:
         lines.append(
             f"last gate: {'PASS' if gate.get('passed') else 'FAIL/unknown'} @ {gate.get('tree_hash')} "
             f"cmd={gate.get('command', '')[:80]}"
         )
     else:
-        lines.append("last gate: (none)")
-    park = state.get("pending_park")
+        cmd = state.get("last_gate_command") or (state.get("last_route") or {}).get("gate")
+        if cmd:
+            lines.append(f"last gate: (no PASS record yet) cmd={str(cmd)[:80]}")
+        else:
+            lines.append("last gate: (none)")
+    park = as_dict(state.get("pending_park")) if state.get("pending_park") else {}
     if park:
         lines.append(f"pending park: job {park.get('job_id')} at {park.get('schedule')} → {park.get('handoff')}")
     else:

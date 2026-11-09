@@ -7,6 +7,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 PACKAGE = Path(__file__).resolve().parent
+_PLUGIN_CTX = None  # set in register(); used by auto-park to dispatch cronjob_manage
 
 # Hyphenated plugin dir is not a normal import package name; put the plugin root
 # (and vendored DF) on sys.path so sibling modules resolve under Hermes load,
@@ -51,7 +52,9 @@ def _on_post_tool_call(tool_name="", args=None, result=None, **kwargs):
         return None
     try:
         from acceptance import capture_terminal_gate
-        capture_terminal_gate(args=args or {}, result=str(result or ""))
+        from tool_args import coerce_tool_args
+
+        capture_terminal_gate(args=coerce_tool_args(args), result=str(result or ""))
     except Exception as exc:
         logger.debug("vibe-relay post_tool_call: %s", exc)
     return None
@@ -98,12 +101,31 @@ def _on_subagent_stop(**kwargs):
 
 
 def _on_pre_tool_call(tool_name="", args=None, task_id="", session_id="", **kwargs):
-    """Block parent file writes when vibe-relay routes the parent to the executor lane."""
+    """Stop-at-threshold first, then executor-lane write block."""
+    from tool_args import coerce_tool_args
+
+    args = coerce_tool_args(args)
+    try:
+        from stop_park import pre_tool_call_directive as stop_directive
+
+        stopped = stop_directive(
+            tool_name=tool_name,
+            args=args,
+            task_id=task_id,
+            session_id=session_id,
+            ctx=_PLUGIN_CTX,
+            **kwargs,
+        )
+        if stopped:
+            return stopped
+    except Exception as exc:
+        logger.warning("vibe-relay stop-park pre_tool_call failed open: %s", exc)
+
     try:
         from executor_lane import pre_tool_call_directive
         return pre_tool_call_directive(
             tool_name=tool_name,
-            args=args or {},
+            args=args,
             task_id=task_id,
             session_id=session_id,
             **kwargs,
@@ -148,10 +170,45 @@ def _register_workshop_skills(ctx) -> None:
             logger.debug("vibe-relay: skill %s not registered: %s", name, exc)
 
 
+def _reload_sibling_modules() -> None:
+    """Gateway disable/enable can leave stale sibling modules in ``sys.modules``.
+
+    Live R6: fresh ``stop_park`` called ``park(..., auto=True)`` while an older
+    ``park`` without ``auto`` was still cached → auto-park failed open after the
+    stop block. Reload plugin-local modules on every register().
+    """
+    import importlib
+
+    names = (
+        "tool_args",
+        "state",
+        "quota",
+        "routing",
+        "acceptance",
+        "provider",
+        "park",
+        "executor_lane",
+        "stop_park",
+    )
+    for name in names:
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        try:
+            importlib.reload(mod)
+        except Exception as exc:
+            logger.debug("vibe-relay: reload %s failed: %s", name, exc)
+
+
 def register(ctx) -> None:
+    global _PLUGIN_CTX
+    _PLUGIN_CTX = ctx
+    _reload_sibling_modules()
+
     from acceptance import VIBE_ACCEPT_SCHEMA, vibe_accept
     from park import vibe_command
     from provider import VibeRelayProvider
+    from tool_args import wrap_tool_handler
 
     ctx.register_delegation_provider(VibeRelayProvider())
 
@@ -159,13 +216,14 @@ def register(ctx) -> None:
         name="vibe_accept",
         toolset="vibe_relay",
         schema=VIBE_ACCEPT_SCHEMA,
-        handler=vibe_accept,
+        handler=wrap_tool_handler(vibe_accept),
         description=VIBE_ACCEPT_SCHEMA["description"][:120],
         emoji="✅",
     )
 
     # Vendored DEV Framework tools (skip if a separate dev-framework plugin already registered them).
     # Skills: DF registers df-import / df-catch-up from vendor/; workshop skills register below.
+    # DF handlers coerce JSON-string args themselves (deferred tool_call bridges).
     try:
         import dev_framework as df  # vendor/ on sys.path
 
@@ -189,8 +247,7 @@ def register(ctx) -> None:
     ctx.register_hook("subagent_start", _on_subagent_start)
     ctx.register_hook("subagent_stop", _on_subagent_stop)
     logger.info(
-        "vibe-relay: hooks registered (pre_tool_call executor-lane enforce=%s)",
-        True,
+        "vibe-relay: hooks registered (pre_tool_call stop-park + executor-lane)",
     )
 
     def _cmd(raw_args: str = "", **kwargs):

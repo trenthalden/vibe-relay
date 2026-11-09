@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1
+
+- **Fix vibe_accept TOOL_ERROR on deferred tools:** `provider.route_task` no longer overwrites `last_gate` (PASS record dict) with the gate *command string*; stores `last_gate_command` instead. Handlers (`vibe_accept`, `df_init`/`df_check`/`df_nav`) coerce JSON-string args and treat non-dict state fields safely — no more `AttributeError: 'str' object has no attribute 'get'`.
+- **Fix stop+park miss on live `chat --oneshot`:** empty `fetch_account_usage` results no longer poison the plugin quota cache for 180s (negative TTL 15s). Falls back to Hermes in-process `cached_account_usage` (warmed by prior turns / `/usage`) so `should_park` sees real used% after `state.json` wipe + `policy auto`.
+- **Fix auto-park after gateway plugin reload:** `register()` reloads sibling modules; `ensure_auto_park` reloads `park` before calling `park(..., auto=True)` so a stale pre-0.3.0 `park` in `sys.modules` cannot drop the handoff/cron after a successful stop block.
+
+## 0.3.0
+
+
+- **Enforced stop-at-threshold + auto park:** when vibe-relay is the active backend and routing says `should_park` (used ≥ `stop_used_percent`, default 90, or exhausted), a `pre_tool_call` hook blocks the **parent** `delegate_task` and file-writing tools with `vibe-relay: quota used N% ≥ stop M% — work parked; resume scheduled at <local time> (reset + buffer).` Reads stay allowed; children never blocked. On the first block, auto-parks **once per reset window** (handoff + one one-shot cron via `park()`); repeated blocks do not create duplicate jobs. `pre_llm_call` context states `parked until …; do not start new work`. Block lifts when used drops below stop or wall-clock passes `reset_at`.
+- Live demo toy initialises vendored **DEV Framework** via real `df_init`; gate is `python .devframework/check.py finish` (project.json test = toy unittest).
+- Resume-now for demos: `hermes cron run <job_id>` (LIVE Hermes CLI).
+
 ## 0.2.4
 
 - Enforce the cheap-executor lane: when vibe-relay is the active backend and routing selects executor (`auto` with remaining ≤ threshold, or `policy=executor-always`), a `pre_tool_call` hook blocks the **parent** from `patch` / `write_file` and from terminal commands that obviously write (`sed -i`, `>` / `>>`, `tee`). Children are never blocked. Config: `delegation.backends.vibe-relay.enforce_executor_lane` (default `true`).

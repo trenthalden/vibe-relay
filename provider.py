@@ -72,6 +72,9 @@ class VibeRelayProvider(DelegationProvider):
         settings = settings_from_delegation(dict(config))
         usage = get_quota(provider=settings.get("quota_provider"))
         decision = decide_from_usage(usage, lane=str(task.get("lane") or "auto"), settings=settings)
+        # Store the gate *command* under last_gate_command. Never write it to
+        # last_gate — that key holds the gate PASS record dict from
+        # capture_terminal_gate / vibe_accept (string overwrite → AttributeError).
         update_state(
             last_route={
                 "lane": decision["lane"],
@@ -81,7 +84,7 @@ class VibeRelayProvider(DelegationProvider):
                 "goal": str(task.get("goal") or "")[:200],
             },
             last_allowed=allowed,
-            last_gate=gate,
+            last_gate_command=gate,
         )
 
         if decision["lane"] == "self":
