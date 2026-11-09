@@ -2,11 +2,26 @@
 
 ![vibe-relay](assets/banner.png)
 
-[▶ Demo video (≈40 s)](assets/demo.mp4) — real tool handlers running in an isolated Hermes home.
+[▶ Demo video (≈90 s)](assets/demo.mp4) — live run: Claude Sonnet hands the edit to Claude Haiku, DEV Framework tests, pause at the quota limit and resume.
 
 ![demo](assets/shot-2.png)
 
 Vibecoding without burning your best model: a Hermes delegation backend that routes coding work to yourself when quota remains, or to a cheap executor when it does not — and only counts work done after a green gate on the real diff, parking itself across usage-window resets.
+
+## Built on DEV Framework
+
+The gate, project rules and `df_init` / `df_check` / `df_nav` come from **[DEV Framework](https://github.com/trenthalden/dev-framework)**, vendored here under `vendor/dev_framework/` (version in `vendor/dev_framework/VERSION`). vibe-relay adds quota routing, the executor lane, acceptance and park/resume on top of it.
+
+Want only the framework, or want it in another coding agent? Use the parent repository:
+
+| Host | Install |
+|---|---|
+| Hermes Agent (framework only) | `hermes plugins install trenthalden/dev-framework`, then `hermes plugins enable dev-framework` |
+| Claude Code | `/plugin marketplace add trenthalden/dev-framework`, then `/plugin install dev-framework@dev-framework` |
+| Cursor | copy or link the repository into `~/.cursor/plugins/local/dev-framework`, then restart Cursor |
+| Any agent with a shell | clone it and run `python scripts/install.py` |
+
+Both enabled in one Hermes profile? See [collision](#collision-with-a-standalone-dev-framework-plugin).
 
 ## 30-second quickstart
 
