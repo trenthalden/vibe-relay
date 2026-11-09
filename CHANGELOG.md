@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Security (maintainer review): `df_nav` runs the plugin’s vendored `navigate.py` with `--root` under `python -I` (target code not on the child import path); DF child env scrubbed (no full `os.environ`); `df_init` refuses Hermes home and protected `$HOME` dot-folders and requires a git work tree or the session cwd.
+- `acceptance`: default cwd is the session terminal cwd via `agent.runtime_cwd.resolve_agent_cwd()`.
+- `park`: clear `pending_park` before scheduling so a later `/vibe park` is not permanently skipped.
+- README disclosure updated for what runs and which env vars are passed.
+
 ## 0.2.1
 
 - Removed in-repo privacy-name scan from workshop tests (privacy checks stay in external review tooling).

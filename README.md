@@ -42,7 +42,7 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 | Tool | `vibe_accept` | Changed paths ⊆ allowed + fresh gate PASS → ACCEPT/REJECT |
 | Tool | `df_init` / `df_check` / `df_nav` | Vendored DEV Framework (df_check returns a terminal command) |
 | Slash | `/vibe` | Quota, mode, last gate, pending park |
-| Slash | `/vibe park` | Handoff + exactly one one-shot cron at reset+buffer |
+| Slash | `/vibe park` | Handoff + one-shot cron at reset+buffer (clears prior pending_park) |
 | Blueprint | `resume-after-reset` | Manual catalog twin of the park resume job |
 | Hooks | `pre_llm_call`, `api_request_error`, `post_tool_call`, `pre_verify`, `subagent_stop` | Quota context; observe exhaustion; capture gate; continue if no PASS |
 
@@ -61,8 +61,12 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 ## Data & network disclosure
 
 - **Network:** only through Hermes `agent.account_usage.fetch_account_usage(provider, read_only=True)` (at most once per 180 s, cached under plugin storage). No direct credential file reads, no xAI/grok-cli paths.
-- **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree; optional handoff write under the target repo’s `docs/`.
-- **Local child processes:** `df_init` runs the vendored DEV Framework installer as a local Python child process that writes framework files into the target repository the agent names. Template scripts copied into a target repo may call `git` (and `gh` for devlog visibility) only when the user or agent runs them.
+- **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `agent.runtime_cwd.resolve_agent_cwd()`); optional handoff write under the target repo’s `docs/`.
+- **Local child processes:**
+  - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree) and protected `$HOME` dot-folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`).
+  - `df_nav` runs the **plugin’s** vendored `template/.devframework/navigate.py` with `--root <target>` (cwd = that vendored folder, `python -I -B`). It does **not** execute the target repo’s `.devframework/navigate.py`.
+  - Child env for those DF tool processes is scrubbed to: `PATH`, `HOME`, `LANG`/`LC_*`, `SYSTEMROOT` (Windows), `PYTHONDONTWRITEBYTECODE`. No parent `*_API_KEY` / secrets; `GH_TOKEN` is not passed (the optional `gh` visibility check is only in target `devlog`/`check` when the agent runs them via `terminal`).
+  - Template scripts copied into a target repo may call `git` (and `gh` for devlog visibility) only when the user or agent runs them.
 - **Shell / approvals:** does not bypass approvals. `df_check` returns the gate command for the agent to run via `terminal`. Park creates a cron job through `cronjob_manage` (normal tool path). No YOLO / non-interactive shells.
 - **Stored data:** `$HERMES_HOME/plugin-data/vibe-relay/state.json` (quota cache, last gate, pending park, last route).
 

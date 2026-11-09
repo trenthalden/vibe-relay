@@ -117,6 +117,8 @@ class InstallTests(WorkspaceTest):
         spec = importlib.util.spec_from_file_location("devframework_hermes", ROOT / "__init__.py")
         hermes = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(hermes)
+        # df_init guard: require a git work tree; WorkspaceTest base is already outside Hermes home.
+        self.git_init()
         target = str(self.target)
         self.assertTrue(hermes.df_init({"target": target, "kind": "tool"}).startswith("INIT OK"))
         self.assertTrue((self.target / ".hermes.md").is_file(), "the Hermes plugin installs its context file")

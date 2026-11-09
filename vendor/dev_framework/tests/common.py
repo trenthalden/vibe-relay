@@ -18,15 +18,22 @@ import install
 from safety import checked_path
 
 
+def fixture_temp_dir() -> str | None:
+    """Temp root outside Hermes homes. Resolve /tmp so macOS's symlink is not in the path."""
+    if os.name == "nt":
+        return None
+    return str(Path("/tmp").resolve())
+
+
 class WorkspaceTest(unittest.TestCase):
     def setUp(self):
-        self.base = Path(tempfile.mkdtemp(prefix="devframework-test-")).absolute()
+        self.base = Path(tempfile.mkdtemp(prefix="devframework-test-", dir=fixture_temp_dir())).absolute()
         self.target = self.base / "new project"
         self.addCleanup(self.cleanup_workspace)
 
     def cleanup_workspace(self):
         # Delete only this exact newly-created fixture root, never an environment root.
-        expected_parent = Path(tempfile.gettempdir()).resolve()
+        expected_parent = Path(fixture_temp_dir() or tempfile.gettempdir()).resolve()
         actual = checked_path(self.base).resolve()
         if actual.parent != expected_parent or not actual.name.startswith("devframework-test-"):
             raise RuntimeError("Unsafe test cleanup root")

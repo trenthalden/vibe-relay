@@ -1,4 +1,4 @@
-"""Park creates exactly one job with correct schedule (stubbed dispatch)."""
+"""Park creates a resume job; pending_park is cleared so a later park is not permanently skipped."""
 from __future__ import annotations
 
 import tempfile
@@ -15,8 +15,6 @@ class ParkTests(IsolatedHomeTest):
         from state import load_state
 
         reset = datetime.now(timezone.utc) + timedelta(hours=3)
-        snap = make_snapshot(92.0)
-        # Override window reset
         from support import FakeSnapshot, FakeWindow
         snap = FakeSnapshot(windows=(FakeWindow(label="Session", used_percent=92.0, reset_at=reset),))
 
@@ -29,7 +27,7 @@ class ParkTests(IsolatedHomeTest):
 
         def dispatch(tool, args):
             calls.append((tool, dict(args)))
-            return '{"success": true, "job_id": "job-1"}'
+            return f'{{"success": true, "job_id": "job-{len(calls)}"}}'
 
         repo = Path(tempfile.mkdtemp(prefix="vibe-park-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(repo, ignore_errors=True))
@@ -47,10 +45,11 @@ class ParkTests(IsolatedHomeTest):
         handoff = repo / "docs" / "vibe-park.md"
         self.assertTrue(handoff.is_file())
         self.assertIn("pause here", handoff.read_text(encoding="utf-8"))
+        self.assertEqual(load_state().get("pending_park", {}).get("job_id"), "job-1")
 
-        # Second park must not create another job
+        # Regression: pending_park must be cleared so a later /vibe park is not permanently skipped.
         out2 = park(repo=str(repo), note="again", dispatch=dispatch, buffer_seconds=buf)
-        self.assertIn("SKIPPED", out2)
-        self.assertEqual(len(calls), 1)
-        pending = load_state().get("pending_park")
-        self.assertEqual(pending.get("job_id"), "job-1")
+        self.assertIn("PARKED", out2)
+        self.assertNotIn("SKIPPED", out2)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(load_state().get("pending_park", {}).get("job_id"), "job-2")

@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 PACKAGE = Path(__file__).resolve().parent
 MAX_LINES, MAX_CHARS = 40, 3500
 
+# Dot-folders under $HOME that must never receive a framework install.
+_PROTECTED_HOME_DOTS = (".ssh", ".aws", ".config", ".gnupg", ".kube", ".docker")
+
 
 def _path(raw: str) -> Path:
     """Accept D:/x, D:\\x and git-bash /d/x alike (the baseline lost turns to this on Windows)."""
@@ -39,10 +42,36 @@ def _trim(text: str, lines: int = MAX_LINES, chars: int = MAX_CHARS) -> str:
     return out if len(out) <= chars else out[: chars // 2] + "\n… (truncated)\n" + out[-chars // 2:]
 
 
+def _child_env() -> dict[str, str]:
+    """Minimal env for DF child processes — never the full parent ``os.environ``.
+
+    Passes PATH, HOME, LANG/LC_*, SYSTEMROOT (Windows), PYTHONDONTWRITEBYTECODE.
+    Does not pass GH_TOKEN: ``df_init`` / ``df_nav`` children do not run the optional
+    ``gh`` repo-visibility check (that lives in target ``check.py`` / ``devlog`` via terminal).
+    """
+    env: dict[str, str] = {"PYTHONDONTWRITEBYTECODE": "1"}
+    for key in ("PATH", "HOME", "SYSTEMROOT"):
+        val = os.environ.get(key)
+        if val is not None:
+            env[key] = val
+    for key, val in os.environ.items():
+        if key == "LANG" or key.startswith("LC_"):
+            env[key] = val
+    return env
+
+
 def _run(argv: list[str], cwd: Path, timeout: int) -> tuple[int, str]:
     try:
-        run = subprocess.run(argv, cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
-                             errors="replace", timeout=timeout, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+        run = subprocess.run(
+            argv,
+            cwd=str(cwd),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=_child_env(),
+        )
     except subprocess.TimeoutExpired:
         return 124, f"timed out after {timeout}s"
     except OSError as error:
@@ -55,22 +84,100 @@ def _framework_dir(target: Path) -> Path | None:
     return devframework if (devframework / "check.py").is_file() else None
 
 
+def _user_home() -> Path:
+    return Path.home().expanduser().resolve()
+
+
+def _hermes_home() -> Path:
+    try:
+        from hermes_constants import get_hermes_home
+        return Path(get_hermes_home()).expanduser().resolve()
+    except Exception:
+        raw = (os.environ.get("HERMES_HOME") or "").strip()
+        if raw:
+            return Path(raw).expanduser().resolve()
+        return (Path.home() / ".hermes").resolve()
+
+
+def _session_cwd() -> Path | None:
+    """Public Hermes session/terminal cwd (not the gateway process cwd)."""
+    try:
+        from agent.runtime_cwd import resolve_agent_cwd
+        return Path(resolve_agent_cwd()).expanduser().resolve()
+    except Exception:
+        try:
+            return Path.cwd().resolve()
+        except OSError:
+            return None
+
+
+def _is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
+def _is_git_work_tree(path: Path) -> bool:
+    try:
+        run = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--is-inside-work-tree"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=_child_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return run.returncode == 0 and "true" in (run.stdout or "").lower()
+
+
+def _refuse_df_init_target(target: Path) -> str | None:
+    """Refuse Hermes home / protected $HOME dots; require git work tree or session cwd."""
+    resolved = target.expanduser().resolve()
+    hermes = _hermes_home()
+    if resolved == hermes or _is_under(resolved, hermes):
+        return f"ERROR: refusing df_init into Hermes home or its subtree ({hermes})."
+
+    home = _user_home()
+    for name in _PROTECTED_HOME_DOTS:
+        protected = (home / name).resolve()
+        if resolved == protected or _is_under(resolved, protected):
+            return f"ERROR: refusing df_init into protected path ({protected})."
+
+    if _is_git_work_tree(resolved):
+        return None
+
+    session = _session_cwd()
+    if session is not None and (resolved == session or _is_under(resolved, session)):
+        return None
+
+    return (
+        "ERROR: df_init requires a git work tree, or the session working directory "
+        "(or a path under it). Refuse Hermes home and protected $HOME dot-folders."
+    )
+
+
 # ---------------------------------------------------------------- tools
 
 def df_init(args: dict, **kwargs) -> str:
     target = _path(args.get("target", ""))
+    refusal = _refuse_df_init_target(target)
+    if refusal:
+        return refusal
     name = (args.get("name") or target.name).strip()
     scale = (args.get("scale") or "").strip()
     kind = args.get("kind") or ("" if args.get("update") else "product")
     if kind == "product" and not scale and not args.get("update"):
         return "ERROR: a product needs a scale (integer + unit, e.g. \"100 users\"); it is a product decision — ask the operator."
     profile = args.get("profile") or "generic"
-    argv = [sys.executable, "-B", str(PACKAGE / "scripts" / "install.py"), "--target", str(target), "--name", name,
+    argv = [sys.executable, "-I", "-B", str(PACKAGE / "scripts" / "install.py"), "--target", str(target), "--name", name,
             "--kind", kind, "--profile", profile, "--devlog" if args.get("devlog") else "--no-devlog", "--hermes"]
     argv += ["--scale", scale] if scale else []
     argv += ["--testing", args["testing"]] if args.get("testing") in ("lean", "advanced") else []
     if args.get("update"):  # with kind: promotion explore → tool → product (product also needs scale)
-        argv = [sys.executable, "-B", str(PACKAGE / "scripts" / "install.py"), "--target", str(target), "--update", "--hermes"]
+        argv = [sys.executable, "-I", "-B", str(PACKAGE / "scripts" / "install.py"), "--target", str(target), "--update", "--hermes"]
         argv += (["--kind", kind] if kind else []) + (["--scale", scale] if scale else [])
     code, out = _run(argv, PACKAGE, 120)
     if code:
@@ -101,6 +208,8 @@ def df_check(args: dict, **kwargs) -> str:
         return f"ERROR: {target} has no .devframework/check.py — run df_init first."
     if mode not in ("doctor", "finish", "commit-check", "secrets", "hostcheck"):
         return "ERROR: mode must be doctor | finish | commit-check | secrets | hostcheck"
+    # Agent runs this via terminal with cwd=target; do not pass -I/-P here — check.py
+    # imports sibling modules from the target's .devframework via the script-dir path entry.
     if mode == "hostcheck":
         argv = [sys.executable, "-B", str(devframework / "hostcheck.py"), str(target)]
     else:
@@ -118,15 +227,19 @@ def df_check(args: dict, **kwargs) -> str:
 
 
 def df_nav(args: dict, **kwargs) -> str:
+    """Run the plugin's vendored navigate.py against ``target`` — never the target's copy."""
     target = _path(args.get("target", ""))
     command = (args.get("command") or "brief").strip()
-    devframework = _framework_dir(target)
-    if devframework is None or not (devframework / "navigate.py").is_file():
-        return f"ERROR: {target} has no .devframework/navigate.py — run df_init (or df_init with update=true on an older install)."
+    if _framework_dir(target) is None:
+        return f"ERROR: {target} has no .devframework/check.py — run df_init (or df_init with update=true on an older install)."
     if command not in ("brief", "find", "index", "contract", "checklist", "handoff"):
         return "ERROR: command must be brief | find | index | contract | checklist | handoff"
     extra = shlex.split(args.get("args") or "", posix=True)
-    code, out = _run([sys.executable, "-B", str(devframework / "navigate.py"), command, *extra], target, 60)
+    nav = PACKAGE / "template" / ".devframework" / "navigate.py"
+    vendored_cwd = nav.parent
+    # -I: isolated (implies -E/-P/-s) so the target's folder is not on the child's import path.
+    argv = [sys.executable, "-I", "-B", str(nav), "--root", str(target), command, *extra]
+    code, out = _run(argv, vendored_cwd, 60)
     return _trim(out, 60, 6000) if code == 0 else f"{command} failed (exit {code}):\n{_trim(out, 20)}"
 
 

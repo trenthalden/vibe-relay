@@ -19,9 +19,27 @@ PASS_PATTERNS = (
 )
 
 
+def resolve_session_cwd() -> str:
+    """Session/terminal cwd via public Hermes API — not the gateway process cwd.
+
+    Documented for plugins: ``agent.runtime_cwd.resolve_agent_cwd()`` (reads the
+    session pin / ``TERMINAL_CWD`` bridge). Falls back to ``Path.cwd()`` outside Hermes.
+    """
+    try:
+        from agent.runtime_cwd import resolve_agent_cwd
+        return str(resolve_agent_cwd())
+    except Exception:
+        return str(Path.cwd())
+
+
+def _cwd(cwd: Optional[str] = None) -> Path:
+    raw = (cwd or "").strip()
+    return Path(raw).expanduser().resolve() if raw else Path(resolve_session_cwd()).expanduser().resolve()
+
+
 def working_tree_hash(cwd: Optional[str] = None) -> str:
     """Stable hash of porcelain status + diff (read-only)."""
-    root = Path(cwd or ".").resolve()
+    root = _cwd(cwd)
     chunks: List[bytes] = []
     for args in (
         ["git", "status", "--porcelain=v1", "-uall"],
@@ -41,7 +59,7 @@ def working_tree_hash(cwd: Optional[str] = None) -> str:
 
 def changed_paths(cwd: Optional[str] = None) -> List[Dict[str, str]]:
     """List changed paths with status letters (read-only git)."""
-    root = Path(cwd or ".").resolve()
+    root = _cwd(cwd)
     try:
         run = subprocess.run(
             ["git", "status", "--porcelain=v1", "-uall"],
@@ -154,13 +172,14 @@ def pre_verify_directive(
 
 def vibe_accept(args: dict, **kwargs) -> str:
     """Compare changed paths to allowed globs; report accept/reject with reasons."""
-    cwd = args.get("cwd") or args.get("workdir") or "."
+    explicit = args.get("cwd") or args.get("workdir")
+    cwd = str(explicit) if explicit else None
     allowed_raw = args.get("allowed") or load_state().get("last_allowed") or ""
     globs = parse_allowed(str(allowed_raw))
     if not globs:
         return "REJECT: no `allowed` globs provided (and no last_allowed in state)."
 
-    entries = changed_paths(str(cwd))
+    entries = changed_paths(cwd)
     if len(entries) == 1 and entries[0].get("status") == "error":
         return f"REJECT: cannot read git status ({entries[0].get('detail')})."
 
@@ -173,7 +192,7 @@ def vibe_accept(args: dict, **kwargs) -> str:
             outside.append(e)
 
     gate = load_state().get("last_gate") or {}
-    tree = working_tree_hash(str(cwd))
+    tree = working_tree_hash(cwd)
     gate_ok = bool(gate.get("passed") and gate.get("tree_hash") == tree)
     lines = [
         f"allowed: {', '.join(globs)}",
@@ -215,7 +234,7 @@ VIBE_ACCEPT_SCHEMA = {
                 "type": "string",
                 "description": "Comma-separated globs (defaults to last delegated allowed).",
             },
-            "cwd": {"type": "string", "description": "Repository root (default: cwd)."},
+            "cwd": {"type": "string", "description": "Repository root (default: session terminal cwd)."},
         },
         "required": [],
     },

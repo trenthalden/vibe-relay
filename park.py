@@ -88,12 +88,9 @@ def park(
     )
     handoff_path = write_handoff(repo=root, note=handoff_note)
 
-    pending = load_state().get("pending_park")
-    if isinstance(pending, dict) and pending.get("job_id"):
-        return (
-            f"PARK SKIPPED: a resume job already pending (job_id={pending.get('job_id')}, "
-            f"at {pending.get('schedule')}). Handoff refreshed at {handoff_path}."
-        )
+    # Clear any previous pending_park before creating a new one-shot job.
+    # Leaving it set permanently made every later `/vibe park` return SKIPPED.
+    update_state(pending_park=None)
 
     prompt = (
         f"Vibe Relay resume-after-reset. Read the handoff at {handoff_path} and continue the parked work. "
