@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.3
+
+- Live-demo hardening: `delegate_task` schema/description and `lean-executor-orchestration` skill now steer the parent to route coding fixes with required `allowed` + `gate` (then `vibe_accept`) instead of editing in-parent.
+- `scripts/live_demo.py` harness for a disposable profile + toy repo (outputs under `out/live-demo/`).
+
 ## 0.2.2
 
 - Security (maintainer review): `df_nav` runs the plugin’s vendored `navigate.py` with `--root` under `python -I` (target code not on the child import path); DF child env scrubbed (no full `os.environ`); `df_init` refuses Hermes home and protected `$HOME` dot-folders and requires a git work tree or the session cwd.

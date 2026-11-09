@@ -36,20 +36,28 @@ class VibeRelayProvider(DelegationProvider):
             },
             "allowed": {
                 "type": "string",
-                "description": "Comma-separated path globs the executor may change (required).",
+                "description": (
+                    "Required. Comma-separated path globs the executor may change "
+                    "(e.g. textutil/**). Never omit — vibe-relay refuses the task."
+                ),
             },
             "gate": {
                 "type": "string",
-                "description": "Shell gate command that must PASS on the real diff (required).",
+                "description": (
+                    "Required. Shell gate that must PASS on the real diff "
+                    "(e.g. python -m unittest discover -s tests -v). Never omit."
+                ),
             },
         }
 
     def description(self, config: Mapping[str, Any]) -> str:
         # No quota numbers here — those go through pre_llm_call context.
         return (
-            "Every delegated task MUST include `allowed` (path globs) and `gate` (command). "
-            "Exit 0 alone is not done — the gate must report PASS on the actual diff. "
-            "Receipt fields: FILES, GATE command+result, BOUNDARIES, residual risk."
+            "For coding fixes: call delegate_task once with goal + required `allowed` "
+            "(path globs the child may edit) + required `gate` (unittest/pytest/build). "
+            "Do not fix the code yourself when this backend is active — route the write "
+            "work, then run the gate and vibe_accept. Exit 0 alone is not done — the gate "
+            "must report PASS on the actual diff. Receipt: FILES, GATE, BOUNDARIES, risk."
         )
 
     def route_task(self, task: Mapping[str, Any], config: Mapping[str, Any]) -> dict[str, Any]:

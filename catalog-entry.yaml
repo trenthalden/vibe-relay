@@ -29,7 +29,7 @@ tier: community
 category: automation
 requires_hermes: ">=0.22.5"
 docs_url: https://github.com/trenthalden/vibe-relay#readme
-version: "0.2.2"
+version: "0.2.3"
 platforms: [linux, macos]
 capabilities:
   provides_tools:

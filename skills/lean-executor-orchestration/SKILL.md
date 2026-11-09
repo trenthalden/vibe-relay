@@ -29,6 +29,17 @@ The executor spends the implementation tokens and tool calls. The orchestrator s
 3. Require the final receipt: `FILES`, `GATE` command and result, `BOUNDARIES`, residual risk.
 4. Run one executor session. If acceptance fails, send one resume/correction with the exact observed error. Do not start a fresh review cascade.
 
+### Hermes + vibe-relay
+
+When the active delegation backend is `vibe-relay`, do **not** edit the failing code in the parent turn. Call `delegate_task` once with:
+
+- `goal` — the closed brief (or a short plain-language task)
+- `allowed` — path globs the child may change (required; e.g. `textutil/**`)
+- `gate` — one shell command that must PASS on the real diff (required; e.g. `python -m unittest discover -s tests -v`)
+- `lane` — `auto` unless the owner forced otherwise
+
+After the child returns: run the gate yourself if needed, then `vibe_accept`. Refuse to widen `allowed` to “fix” an out-of-scope edit.
+
 ### Brief template
 
 ```text

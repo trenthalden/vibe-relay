@@ -1,5 +1,5 @@
 name: vibe-relay
-version: 0.2.2
+version: 0.2.3
 description: >
   Vibecoding without burning your best model: quota-aware self vs cheap executor
   delegation, gate-bound acceptance, park/resume across usage-window resets, and

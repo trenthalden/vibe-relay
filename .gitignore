@@ -8,3 +8,6 @@ __pycache__/
 RECEIPT.md
 __pycache__/
 *.py[cod]
+
+# Live demo artifacts (R3)
+out/
