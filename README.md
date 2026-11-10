@@ -82,9 +82,10 @@ When vibe-relay is `delegation.backend` **and** routing says `should_park` (acco
 - **Still allowed:** reads, `vibe_accept`, gate/test commands (`unittest` / `pytest` / `python .devframework/check.py …` / `git status|diff`).
 - **Never blocked:** delegate children.
 - **Auto-park (once per reset window):** on the first blocked call, write the handoff and create **exactly one** one-shot cron via `park()` at `reset_at + park_buffer_seconds`. Repeated blocks / turns in the same window do **not** create more cron jobs (**cost: 1 cron job per reset window**).
+- **Cron loop guard:** if the session is itself a Hermes cron run (`HERMES_CRON_SESSION`) and `cron.allow_agent_scheduling` is not true, park still writes the handoff and the stop hook still blocks, but **no resume cron is created** (message: *no resume timer was set because this is a scheduled run*). Same guard for manual `/vibe park`.
 - **Context:** `pre_llm_call` adds `parked until …; do not start new work`.
 - **Lifts automatically** when used drops below stop, or wall-clock passes `reset_at`.
-- Manual `/vibe park` still works and always schedules a fresh job.
+- Manual `/vibe park` still works and schedules a fresh job when not inside a gated-off cron session.
 
 Block message shape: `vibe-relay: quota used N% ≥ stop M% — work parked; resume scheduled at <local time> (reset + buffer).`
 
@@ -101,16 +102,18 @@ When enabled (default) **and** vibe-relay is `delegation.backend` **and** the pa
 
 Block message shape: `vibe-relay: quota is low (N% left) — route this edit through delegate_task with allowed + gate; the cheap executor will make it.`
 
-## Data & network disclosure
+## Data & network disclosure / security
 
-- **Network:** only through Hermes `agent.account_usage.fetch_account_usage(provider, read_only=True)` (usable snapshots cached ≤ 180 s under plugin storage; empty/failed fetches use a 15 s negative TTL and may fall back to in-process `agent.account_usage_cache.cached_account_usage`). No direct credential file reads, no xAI/grok-cli paths.
-- **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `agent.runtime_cwd.resolve_agent_cwd()`); optional handoff write under the target repo’s `docs/`.
+- **Network:** only through Hermes public `agent.account_usage.fetch_account_usage(provider, read_only=True)` (usable snapshots cached ≤ 180 s under plugin storage; empty/failed fetches use a **15 s negative TTL** so a brief miss after `state.json` wipe does not lock out stop/routing for a full TTL). No private `account_usage_cache` import, no direct credential file reads, no xAI/grok-cli paths.
+- **Slug confinement:** vendored `df_nav` → `navigate.py` checklist/handoff (and vibe-relay park handoff) accept only `[A-Za-z0-9._-]+` slugs; reject `..`, empty, and leading-dot forms; the resolved path must stay under `root/docs` before any read, write, or unlink (blocks `../`, nested `a/b`, absolute paths, and symlinked docs/file escapes).
+- **Cron loop guard:** park/auto-park will not call `cronjob_manage` when `HERMES_CRON_SESSION` is set unless `cron.allow_agent_scheduling` is true (core’s loop-prevention gate); the stop block still applies and says no resume timer was set because this is a scheduled run.
+- **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `agent.runtime_cwd.resolve_agent_cwd()`); optional handoff write under the target repo’s `docs/` (slug-confined).
 - **Local child processes:**
-  - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree) and protected `$HOME` dot-folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`).
+  - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree), **`$HOME` itself**, **filesystem root (`/`)**, and protected `$HOME` dot-folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`).
   - `df_nav` runs the **plugin’s** vendored `template/.devframework/navigate.py` with `--root <target>` (cwd = that vendored folder, `python -I -B`). It does **not** execute the target repo’s `.devframework/navigate.py`.
   - Child env for those DF tool processes is scrubbed to: `PATH`, `HOME`, `LANG`/`LC_*`, `SYSTEMROOT` (Windows), `PYTHONDONTWRITEBYTECODE`. No parent `*_API_KEY` / secrets; `GH_TOKEN` is not passed (the optional `gh` visibility check is only in target `devlog`/`check` when the agent runs them via `terminal`).
   - Template scripts copied into a target repo may call `git` (and `gh` for devlog visibility) only when the user or agent runs them.
-- **Shell / approvals:** does not bypass approvals. `df_check` returns the gate command for the agent to run via `terminal`. Park creates a cron job through `cronjob_manage` (normal tool path). No YOLO / non-interactive shells.
+- **Shell / approvals:** does not bypass approvals. `df_check` returns the gate command for the agent to run via `terminal`. Park creates a cron job through `cronjob_manage` (normal tool path) except under the cron loop guard above. No YOLO / non-interactive shells.
 - **Stored data:** `$HERMES_HOME/plugin-data/vibe-relay/state.json` (quota cache, last gate, pending park, last route).
 
 ## Collision with a standalone `dev-framework` plugin

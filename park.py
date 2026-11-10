@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,14 @@ from state import load_state, update_state
 from tool_args import as_dict
 
 DispatchFn = Callable[[str, dict], str]
+
+# Handoff filenames under docs/ — same confinement as vendored navigate.py slugs.
+_HANDOFF_SLUG = re.compile(r"^[A-Za-z0-9._-]+$")
+
+# Block message fragment when cron.allow_agent_scheduling would be bypassed.
+CRON_NO_RESUME_TIMER = (
+    "no resume timer was set because this is a scheduled run"
+)
 
 
 def _parse_reset(reset_at: str) -> Optional[datetime]:
@@ -38,16 +47,72 @@ def schedule_iso(reset_at: str, buffer_seconds: int = 120) -> str:
     return dt.isoformat()
 
 
+def _truthy(value: str) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def in_cron_session() -> bool:
+    """True when this process/session is a Hermes cron run (``HERMES_CRON_SESSION``).
+
+    LIVE core sets the marker as a ContextVar in ``cron/scheduler.py``
+    (``CronSessionContext.enter`` ≈ L2376–2379) so tool-layer guards stay
+    meaningful; ``tools/cronjob_tools.py`` ``check_cronjob_requirements``
+    (≈ L1222–1234) and ``_resolve_cron_disabled_toolsets`` (≈ L415–436) read
+    the same marker / ``cron.allow_agent_scheduling`` gate. Fall back to
+    process env for tests and hosts that only export the variable.
+    """
+    try:
+        from gateway.session_context import get_session_env
+
+        if _truthy(get_session_env("HERMES_CRON_SESSION", "")):
+            return True
+    except Exception:
+        pass
+    return _truthy(os.environ.get("HERMES_CRON_SESSION", ""))
+
+
+def agent_scheduling_allowed() -> bool:
+    """``cron.allow_agent_scheduling`` from Hermes config (default false)."""
+    try:
+        from hermes_cli.config import load_config
+
+        cron = (load_config() or {}).get("cron") or {}
+        return bool(cron.get("allow_agent_scheduling"))
+    except Exception:
+        return False
+
+
+def cron_scheduling_blocked() -> bool:
+    """Skip creating resume cron when inside a cron session without the gate."""
+    return in_cron_session() and not agent_scheduling_allowed()
+
+
+def _confine_handoff_slug(slug: str) -> str:
+    text = str(slug or "").strip()
+    if not text or not _HANDOFF_SLUG.fullmatch(text) or ".." in text or text.startswith("."):
+        raise ValueError(
+            f"invalid handoff slug {slug!r}: use only letters, digits, . _ - "
+            "(no path separators, no '..', no leading dot)"
+        )
+    return text
+
+
 def write_handoff(
     *,
     repo: Path,
     note: str,
     slug: str = "vibe-park",
 ) -> Path:
-    """Write a plain markdown handoff under docs/ (or checklist location)."""
-    docs = repo / "docs"
+    """Write a plain markdown handoff under docs/ (slug confined to docs/)."""
+    slug = _confine_handoff_slug(slug)
+    root = repo.resolve()
+    docs = (root / "docs").resolve()
+    if docs != root and root not in docs.parents:
+        raise ValueError("docs/ escapes project root (symlink?)")
     docs.mkdir(parents=True, exist_ok=True)
-    path = docs / f"{slug}.md"
+    path = (docs / f"{slug}.md").resolve()
+    if path != docs and docs not in path.parents:
+        raise ValueError(f"handoff path escapes docs/: {slug!r}")
     body = (
         f"# Vibe Relay handoff — {slug}\n\n"
         f"<!-- vibe-relay park handoff -->\n\n"
@@ -78,6 +143,10 @@ def park(
     auto-park already exists for the same ``reset_at``, return SKIPPED without
     creating another cron job. Manual ``/vibe park`` keeps ``auto=False`` and
     always schedules a fresh job.
+
+    Inside a Hermes cron session (``HERMES_CRON_SESSION``), scheduling is skipped
+    unless ``cron.allow_agent_scheduling`` is true — ``ctx.dispatch_tool`` would
+    otherwise bypass the core toolset denylist that normally prevents cron loops.
     """
     root = Path(repo).expanduser().resolve()
     usage = get_quota()
@@ -94,7 +163,7 @@ def park(
             isinstance(existing, dict)
             and existing.get("auto")
             and str(existing.get("reset_at") or "") == str(reset)
-            and existing.get("job_id")
+            and (existing.get("job_id") or existing.get("cron_skipped"))
         ):
             return (
                 f"PARK SKIPPED (already auto-parked for reset {reset})\n"
@@ -129,6 +198,26 @@ def park(
         "workdir": str(root),
     }
 
+    if cron_scheduling_blocked():
+        record = {
+            "job_id": None,
+            "schedule": None,
+            "reset_at": reset,
+            "buffer_seconds": buf,
+            "handoff": str(handoff_path),
+            "create_args": args,
+            "dispatch_result": "",
+            "auto": bool(auto),
+            "cron_skipped": "scheduled_run",
+        }
+        update_state(pending_park=record)
+        return (
+            f"PARKED ({CRON_NO_RESUME_TIMER})\n"
+            f"handoff: {handoff_path}\n"
+            f"cron: (not scheduled — cron session without cron.allow_agent_scheduling)\n"
+            f"job_id: (none)"
+        )
+
     dispatcher = dispatch
     if dispatcher is None and ctx is not None:
         dispatcher = lambda tool, a: ctx.dispatch_tool(tool, a)
@@ -159,6 +248,7 @@ def park(
         f"job_id: {job_id}\n"
         f"dispatch: {result_text[:400]}"
     )
+
 
 
 def _extract_job_id(text: str) -> Optional[str]:

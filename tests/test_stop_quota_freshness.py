@@ -1,21 +1,15 @@
-"""DEFECT 2 (R6): stop+park must work on the real chat path after state wipe.
+"""DEFECT 2 (R6) + R7: stop+park with public fetch only + 15 s negative TTL.
 
-Live failure: setup deletes ``state.json``; in-gateway ``fetch_account_usage``
-sometimes returns no snapshot; plugin cached that empty result for 180s; ``used``
-stayed None → ``should_park`` false → ``delegate_task`` ran despite stop=50 and
-real session/week used ≥ 50. Executor-lane still blocked writes (``?% left``).
-
-Regression: empty/poisoned plugin quota + Hermes in-process cache with real
-windows → stop blocks ``delegate_task`` and auto-parks once.
+R6: empty ``fetch_account_usage`` must not poison the plugin cache for 180 s.
+R7: drop private ``agent.account_usage_cache.cached_account_usage``; keep only
+public ``fetch_account_usage(..., read_only=True)``. Empty snapshot → retry
+after 15 s; real snapshot → stop fires.
 """
 from __future__ import annotations
 
 import tempfile
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
-from unittest import mock
 
 from support import IsolatedHomeTest, FakeSnapshot, FakeWindow
 
@@ -37,34 +31,6 @@ def _delegation(**own):
     }
 
 
-@dataclass
-class _HermesWindow:
-    label: str
-    used_percent: float
-    reset_at: datetime
-    detail: Optional[str] = None
-    scope: str = "account"
-
-
-@dataclass
-class _HermesSnap:
-    provider: str = "anthropic"
-    source: str = "oauth_usage_api"
-    fetched_at: datetime = None  # type: ignore[assignment]
-    title: str = "Account limits"
-    plan: Optional[str] = None
-    windows: tuple = ()
-    details: tuple = ()
-    unavailable_reason: Optional[str] = None
-    identity: Optional[str] = None
-    raw: Optional[dict] = None
-    usage_window: bool = False
-
-    def __post_init__(self):
-        if self.fetched_at is None:
-            self.fetched_at = datetime.now(timezone.utc)
-
-
 class StopQuotaFreshnessTests(IsolatedHomeTest):
     def setUp(self):
         super().setUp()
@@ -78,72 +44,77 @@ class StopQuotaFreshnessTests(IsolatedHomeTest):
         clear_child_registry()
         super().tearDown()
 
-    def test_empty_plugin_cache_uses_hermes_cache_for_stop(self):
-        """Real failing condition: poisoned empty quota + warm Hermes cache → block."""
+    def test_empty_snapshot_retries_after_negative_ttl_then_stop_fires(self):
+        """Empty plugin cache → short TTL → later public fetch with windows → block."""
         from state import save_state
         from stop_park import pre_tool_call_directive
         import quota as quota_mod
+        from quota import NEGATIVE_CACHE_TTL_SECONDS
 
         repo = Path(tempfile.mkdtemp(prefix="vibe-stop-fresh-"))
         self.addCleanup(lambda: __import__("shutil").rmtree(repo, ignore_errors=True))
 
-        # Live shape after setup wipe + failed fetch (cached for 180s on 0.3.0):
-        save_state(
-            {
-                "quota": {
-                    "available": False,
-                    "cache_fetched_at": 1_000_000.0,
-                    "from_cache": False,
-                    "provider": "anthropic",
-                    "unavailable_reason": "no snapshot",
-                },
-                "quota_provider": "anthropic",
-            }
-        )
-
+        save_state({})
         reset = datetime.now(timezone.utc) + timedelta(hours=4)
-        hermes_snap = _HermesSnap(
+        real_snap = FakeSnapshot(
+            provider="anthropic",
             windows=(
-                _HermesWindow("Current session", 65.0, reset),
-                _HermesWindow("Current week", 71.0, reset),
-            )
+                FakeWindow("Current session", 65.0, reset),
+                FakeWindow("Current week", 71.0, reset),
+            ),
         )
+        calls = {"n": 0}
 
-        def empty_fetch(_provider):
-            return None
+        def fetch(_provider):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return None
+            return real_snap
 
-        calls = []
+        t0 = 1_000_000.0
+        empty = quota_mod.get_quota(provider="anthropic", fetch=fetch, now=t0, force=True)
+        self.assertFalse(quota_mod._usable_usage(empty))
+        self.assertEqual(calls["n"], 1)
+
+        # Within negative TTL → still empty, no refetch.
+        again = quota_mod.get_quota(
+            provider="anthropic", fetch=fetch, now=t0 + 1, force=False
+        )
+        self.assertTrue(again.get("from_cache"))
+        self.assertEqual(calls["n"], 1)
+
+        # Past negative TTL → public fetch returns real windows → stop fires.
+        usage = quota_mod.get_quota(
+            provider="anthropic",
+            fetch=fetch,
+            now=t0 + NEGATIVE_CACHE_TTL_SECONDS + 1,
+            force=False,
+        )
+        self.assertEqual(calls["n"], 2)
+        self.assertEqual(max(w["used_percent"] for w in usage["windows"]), 71.0)
+
+        dispatch_calls = []
 
         def dispatch(tool, args):
-            calls.append((tool, dict(args)))
-            return '{"success": true, "job_id": "cron-r6-1"}'
+            dispatch_calls.append((tool, dict(args)))
+            return '{"success": true, "job_id": "cron-r7-1"}'
 
-        with mock.patch.object(quota_mod, "_hermes_cached_snapshot", return_value=hermes_snap):
-            # Age within old full TTL but past negative TTL → must refresh via Hermes cache.
-            usage = quota_mod.get_quota(
-                provider="anthropic",
-                fetch=empty_fetch,
-                now=1_000_000.0 + 30,  # > NEGATIVE_CACHE_TTL (15), < 180
-                force=False,
-            )
-            self.assertEqual(max(w["used_percent"] for w in usage["windows"]), 71.0)
-
-            d = pre_tool_call_directive(
-                tool_name="delegate_task",
-                args={"goal": "add docstring", "allowed": "textutil/**", "gate": "true"},
-                session_id="parent",
-                task_id="parent",
-                delegation=_delegation(stop_used_percent=50),
-                usage=usage,
-                dispatch=dispatch,
-                repo=str(repo),
-            )
+        d = pre_tool_call_directive(
+            tool_name="delegate_task",
+            args={"goal": "add docstring", "allowed": "textutil/**", "gate": "true"},
+            session_id="parent",
+            task_id="parent",
+            delegation=_delegation(stop_used_percent=50),
+            usage=usage,
+            dispatch=dispatch,
+            repo=str(repo),
+        )
 
         self.assertIsInstance(d, dict)
         self.assertEqual(d.get("action"), "block")
         self.assertIn("quota used 71%", d.get("message") or "")
         self.assertIn("≥ stop 50%", d.get("message") or "")
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(dispatch_calls), 1)
         self.assertTrue((repo / "docs" / "vibe-park.md").is_file())
 
     def test_negative_cache_does_not_poison_for_full_ttl(self):
@@ -160,27 +131,46 @@ class StopQuotaFreshnessTests(IsolatedHomeTest):
             return None
 
         t0 = 2_000_000.0
-        with mock.patch.object(quota_mod, "_hermes_cached_snapshot", return_value=None):
-            a = quota_mod.get_quota(provider="anthropic", fetch=empty_fetch, now=t0, force=True)
-            self.assertFalse(a.get("available"))
-            # Within negative TTL → cached empty
-            b = quota_mod.get_quota(
-                provider="anthropic", fetch=empty_fetch, now=t0 + 1, force=False
-            )
-            self.assertTrue(b.get("from_cache"))
-            self.assertEqual(len(calls), 1)
-            # Past negative TTL → refetch even though < 180s
-            c = quota_mod.get_quota(
-                provider="anthropic",
-                fetch=empty_fetch,
-                now=t0 + NEGATIVE_CACHE_TTL_SECONDS + 1,
-                force=False,
-            )
-            self.assertFalse(c.get("from_cache"))
-            self.assertEqual(len(calls), 2)
+        a = quota_mod.get_quota(provider="anthropic", fetch=empty_fetch, now=t0, force=True)
+        self.assertFalse(a.get("available"))
+        b = quota_mod.get_quota(
+            provider="anthropic", fetch=empty_fetch, now=t0 + 1, force=False
+        )
+        self.assertTrue(b.get("from_cache"))
+        self.assertEqual(len(calls), 1)
+        c = quota_mod.get_quota(
+            provider="anthropic",
+            fetch=empty_fetch,
+            now=t0 + NEGATIVE_CACHE_TTL_SECONDS + 1,
+            force=False,
+        )
+        self.assertFalse(c.get("from_cache"))
+        self.assertEqual(len(calls), 2)
+
+    def test_no_private_account_usage_cache_import(self):
+        """R7: quota.py must not import the private cache helper."""
+        import ast
+        from pathlib import Path
+
+        import quota as quota_mod
+
+        tree = ast.parse(Path(quota_mod.__file__).read_text(encoding="utf-8"))
+        imported = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.extend(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                mod = node.module or ""
+                imported.append(mod)
+                imported.extend(f"{mod}.{a.name}" for a in node.names)
+        joined = " ".join(imported)
+        self.assertNotIn("account_usage_cache", joined)
+        self.assertNotIn("cached_account_usage", joined)
+        self.assertIn("agent.account_usage", joined)
+
 
     def test_executor_lane_still_fires_when_quota_empty_but_stop_needs_used(self):
-        """Document the live split: empty used% → executor-lane yes, stop no (without fallback)."""
+        """Empty used% → executor-lane yes, stop no (without a usable fetch)."""
         from stop_park import pre_tool_call_directive
         from executor_lane import pre_tool_call_directive as lane_directive
 
@@ -190,7 +180,6 @@ class StopQuotaFreshnessTests(IsolatedHomeTest):
             "unavailable_reason": "no snapshot",
             "windows": [],
         }
-        # Without usable used%, stop must not block (no false park on unknown).
         d_stop = pre_tool_call_directive(
             tool_name="delegate_task",
             args={"goal": "x"},
@@ -202,7 +191,6 @@ class StopQuotaFreshnessTests(IsolatedHomeTest):
         )
         self.assertIsNone(d_stop)
 
-        # Executor-lane still routes to executor when remaining unknown.
         d_lane = lane_directive(
             tool_name="patch",
             args={"path": "a.py"},

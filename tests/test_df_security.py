@@ -126,6 +126,19 @@ class DfInitTargetGuardTests(IsolatedHomeTest):
             self.assertTrue(out.startswith("ERROR:"), f"{name}: {out}")
             self.assertIn("protected", out.lower())
 
+    def test_refuse_home_itself_and_filesystem_root(self):
+        df = self._df()
+        fake_home = _safe_mkdtemp("df-home-root-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(fake_home, ignore_errors=True))
+        with mock.patch.object(df, "_run", return_value=(0, "should-not-run")):
+            with mock.patch.object(df, "_user_home", return_value=fake_home):
+                out_home = df.df_init({"target": str(fake_home), "kind": "explore", "name": "x"})
+                out_root = df.df_init({"target": "/", "kind": "explore", "name": "x"})
+        self.assertTrue(out_home.startswith("ERROR:"), out_home)
+        self.assertIn("$HOME", out_home)
+        self.assertTrue(out_root.startswith("ERROR:"), out_root)
+        self.assertIn("filesystem root", out_root.lower())
+
     def test_allow_git_work_tree(self):
         df = self._df()
         repo = _safe_mkdtemp("df-init-ok-")

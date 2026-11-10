@@ -134,13 +134,20 @@ def _is_git_work_tree(path: Path) -> bool:
 
 
 def _refuse_df_init_target(target: Path) -> str | None:
-    """Refuse Hermes home / protected $HOME dots; require git work tree or session cwd."""
+    """Refuse Hermes home / $HOME itself / filesystem root / protected $HOME dots;
+    require git work tree or session cwd."""
     resolved = target.expanduser().resolve()
+    # Filesystem root and the user's home directory itself are never install targets.
+    if resolved == Path(resolved.anchor).resolve():
+        return f"ERROR: refusing df_init into filesystem root ({resolved})."
+    home = _user_home()
+    if resolved == home.resolve():
+        return f"ERROR: refusing df_init into $HOME itself ({home})."
+
     hermes = _hermes_home()
     if resolved == hermes or _is_under(resolved, hermes):
         return f"ERROR: refusing df_init into Hermes home or its subtree ({hermes})."
 
-    home = _user_home()
     for name in _PROTECTED_HOME_DOTS:
         protected = (home / name).resolve()
         if resolved == protected or _is_under(resolved, protected):
@@ -155,8 +162,10 @@ def _refuse_df_init_target(target: Path) -> str | None:
 
     return (
         "ERROR: df_init requires a git work tree, or the session working directory "
-        "(or a path under it). Refuse Hermes home and protected $HOME dot-folders."
+        "(or a path under it). Refuse Hermes home, $HOME itself, filesystem root, "
+        "and protected $HOME dot-folders."
     )
+
 
 
 # ---------------------------------------------------------------- tools

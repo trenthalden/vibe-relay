@@ -134,15 +134,23 @@ def stop_block_message(
     used_percent: Optional[float],
     stop_used_percent: float,
     resume_local: str,
+    resume_scheduled: bool = True,
 ) -> str:
     if used_percent is None:
         n = "?"
     else:
         n = str(int(round(float(used_percent))))
     m = str(int(round(float(stop_used_percent))))
+    if resume_scheduled:
+        return (
+            f"vibe-relay: quota used {n}% ≥ stop {m}% — work parked; "
+            f"resume scheduled at {resume_local} (reset + buffer)."
+        )
+    from park import CRON_NO_RESUME_TIMER
+
     return (
         f"vibe-relay: quota used {n}% ≥ stop {m}% — work parked; "
-        f"resume scheduled at {resume_local} (reset + buffer)."
+        f"{CRON_NO_RESUME_TIMER}."
     )
 
 
@@ -151,7 +159,7 @@ def already_auto_parked_for_reset(reset_at: Optional[str]) -> bool:
     if not isinstance(pending, dict) or not pending.get("auto"):
         return False
     if not reset_at:
-        return bool(pending.get("job_id"))
+        return bool(pending.get("job_id") or pending.get("cron_skipped"))
     return str(pending.get("reset_at") or "") == str(reset_at)
 
 
@@ -249,9 +257,11 @@ def pre_tool_call_directive(
     if not is_stop_blocked_tool(tool_name, args):
         return None
 
-    # First block in this reset window → auto-park once.
+    # First block in this reset window → auto-park once (cron may be skipped
+    # inside a Hermes cron session unless cron.allow_agent_scheduling is true).
+    park_info: Dict[str, Any] = {}
     try:
-        ensure_auto_park(
+        park_info = ensure_auto_park(
             repo=resolve_park_repo(repo),
             reset_at=decision.get("reset_at"),
             buffer_seconds=int(decision.get("buffer_seconds") or 120),
@@ -261,10 +271,15 @@ def pre_tool_call_directive(
     except Exception as exc:
         logger.warning("vibe-relay: auto-park failed: %s", exc)
 
+    pending = (park_info or {}).get("pending_park") or load_state().get("pending_park") or {}
+    resume_scheduled = not bool(
+        isinstance(pending, dict) and pending.get("cron_skipped") == "scheduled_run"
+    )
     message = stop_block_message(
         used_percent=decision.get("used_percent"),
         stop_used_percent=float(decision.get("stop_used_percent") or DEFAULT_STOP_USED_PERCENT),
         resume_local=str(decision.get("resume_local") or "?"),
+        resume_scheduled=resume_scheduled,
     )
     logger.info("vibe-relay: stop-park blocking parent %s", tool_name)
     update_state(last_stop={"blocked_tool": tool_name, "message": message, "decision": decision})

@@ -106,18 +106,6 @@ def _usable_usage(usage: Optional[Dict[str, Any]]) -> bool:
     return max_used_percent(usage) is not None
 
 
-def _hermes_cached_snapshot(provider: Optional[str]) -> Any:
-    """In-process Hermes usage cache (warmed by ``/usage`` / per-turn session.usage)."""
-    if not provider:
-        return None
-    try:
-        from agent.account_usage_cache import cached_account_usage
-
-        return cached_account_usage(str(provider))
-    except Exception:
-        return None
-
-
 def get_quota(
     *,
     provider: Optional[str] = None,
@@ -127,9 +115,11 @@ def get_quota(
 ) -> Dict[str, Any]:
     """Return cached usage dict; fetch at most once per ``CACHE_TTL_SECONDS``.
 
-    Empty snapshots use a short negative TTL and fall back to Hermes's in-process
-    ``cached_account_usage`` so stop-at-threshold still sees real used% on the
-    live ``chat --oneshot`` path after ``state.json`` deletion.
+    Empty / failed snapshots use a short ``NEGATIVE_CACHE_TTL_SECONDS`` so a wipe
+    of ``state.json`` plus a briefly-empty public ``fetch_account_usage`` does
+    not lock out stop-at-threshold for a full positive TTL. Only the public
+    ``agent.account_usage.fetch_account_usage(..., read_only=True)`` path is used
+    (no private in-process usage-cache fallback).
     """
     now = time.time() if now is None else now
     state = load_state()
@@ -146,21 +136,6 @@ def get_quota(
             if exhausted_until:
                 usage["exhausted_until"] = exhausted_until
             usage["from_cache"] = True
-            # Empty plugin cache: still try Hermes in-process snapshot before giving up.
-            if not usable:
-                slug_hint = provider or active_provider_slug() or usage.get("provider")
-                fallback = _hermes_cached_snapshot(slug_hint)
-                if fallback is not None:
-                    fb = snapshot_to_dict(fallback)
-                    if _usable_usage(fb):
-                        fb["provider"] = slug_hint or fb.get("provider")
-                        fb["cache_fetched_at"] = now
-                        fb["from_cache"] = False
-                        fb["from_hermes_cache"] = True
-                        if exhausted_until:
-                            fb["exhausted_until"] = exhausted_until
-                        update_state(quota=fb, quota_provider=slug_hint)
-                        return fb
             return usage
 
     slug = provider or active_provider_slug() or (cached or {}).get("provider")
@@ -173,21 +148,13 @@ def get_quota(
         error = str(exc)
 
     usage = snapshot_to_dict(snapshot)
-    if not _usable_usage(usage):
-        fallback = _hermes_cached_snapshot(slug)
-        if fallback is not None:
-            fb = snapshot_to_dict(fallback)
-            if _usable_usage(fb):
-                usage = fb
-                usage["from_hermes_cache"] = True
-                error = None
-        elif _usable_usage(cached) and (now - fetched_at) < CACHE_TTL_SECONDS:
-            # Prefer a still-fresh previous good snapshot over a new empty fetch.
-            usage = dict(cached)
-            usage["from_cache"] = True
-            if exhausted_until:
-                usage["exhausted_until"] = exhausted_until
-            return usage
+    if not _usable_usage(usage) and _usable_usage(cached) and (now - fetched_at) < CACHE_TTL_SECONDS:
+        # Prefer a still-fresh previous good snapshot over a new empty fetch.
+        usage = dict(cached)
+        usage["from_cache"] = True
+        if exhausted_until:
+            usage["exhausted_until"] = exhausted_until
+        return usage
 
     if slug:
         usage["provider"] = slug

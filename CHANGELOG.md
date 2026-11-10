@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- **Review fixes (teknium1 / PR #150547):** confine checklist/handoff slugs in vendored `navigate.py` (and park handoff) to `[A-Za-z0-9._-]+` with a resolved-path check under `root/docs` before any read/write/unlink; respect the Hermes cron loop guard (`HERMES_CRON_SESSION` + `cron.allow_agent_scheduling`) so auto-park and `/vibe park` do not schedule a resume timer from a cron session unless the gate is on (block message says so); drop private `agent.account_usage_cache.cached_account_usage` and keep only public `fetch_account_usage(..., read_only=True)` with the 15 s negative TTL; `df_init` also refuses `$HOME` itself and filesystem root.
+
 ## 0.3.1
 
 - **Fix vibe_accept TOOL_ERROR on deferred tools:** `provider.route_task` no longer overwrites `last_gate` (PASS record dict) with the gate *command string*; stores `last_gate_command` instead. Handlers (`vibe_accept`, `df_init`/`df_check`/`df_nav`) coerce JSON-string args and treat non-dict state fields safely — no more `AttributeError: 'str' object has no attribute 'get'`.
