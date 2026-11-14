@@ -85,8 +85,8 @@ def earliest_reset_at(usage: Dict[str, Any]) -> Optional[str]:
 
 def active_provider_slug() -> Optional[str]:
     try:
-        from hermes_cli.config import load_config
-        cfg = load_config() or {}
+        from hermes_cli.config import load_config_readonly
+        cfg = load_config_readonly() or {}
         model = cfg.get("model") or {}
         slug = str(model.get("provider") or "").strip()
         return slug or None
@@ -124,31 +124,50 @@ def get_quota(
     now = time.time() if now is None else now
     state = load_state()
     cached = state.get("quota") if isinstance(state.get("quota"), dict) else None
-    fetched_at = float((cached or {}).get("cache_fetched_at") or 0)
+    if cached and ("raw" in cached or "identity" in cached):
+        cached = {key: value for key, value in cached.items() if key not in {"raw", "identity"}}
+        update_state(quota=cached)
+    try:
+        fetched_at = float((cached or {}).get("cache_fetched_at") or 0)
+    except (TypeError, ValueError, OverflowError):
+        fetched_at = float("-inf")
     exhausted_until = state.get("exhausted_until")
     age = now - fetched_at
+    slug = provider or active_provider_slug()
+    cached_provider = (cached or {}).get("provider") or state.get("quota_provider")
+    same_provider = bool(
+        slug and cached_provider
+        and str(cached_provider).strip().lower() == str(slug).strip().lower()
+    )
 
-    if cached and not force:
+    if cached and same_provider and not force:
         usable = _usable_usage(cached)
         ttl = CACHE_TTL_SECONDS if usable else NEGATIVE_CACHE_TTL_SECONDS
-        if age < ttl:
+        if 0 <= age < ttl:
             usage = dict(cached)
             if exhausted_until:
                 usage["exhausted_until"] = exhausted_until
             usage["from_cache"] = True
             return usage
 
-    slug = provider or active_provider_slug() or (cached or {}).get("provider")
     fetcher = fetch or default_fetch
     snapshot = None
     error = None
     try:
         snapshot = fetcher(slug) if slug else None
     except Exception as exc:
-        error = str(exc)
+        error = type(exc).__name__
 
     usage = snapshot_to_dict(snapshot)
-    if not _usable_usage(usage) and _usable_usage(cached) and (now - fetched_at) < CACHE_TTL_SECONDS:
+    usage.pop("raw", None)
+    usage.pop("identity", None)
+    if (
+        not _usable_usage(usage)
+        and same_provider
+        and isinstance(cached, dict)
+        and _usable_usage(cached)
+        and 0 <= age < CACHE_TTL_SECONDS
+    ):
         # Prefer a still-fresh previous good snapshot over a new empty fetch.
         usage = dict(cached)
         usage["from_cache"] = True
@@ -159,7 +178,7 @@ def get_quota(
     if slug:
         usage["provider"] = slug
     if error:
-        usage["unavailable_reason"] = usage.get("unavailable_reason") or error
+        usage["unavailable_reason"] = usage.get("unavailable_reason") or f"quota fetch failed ({error})"
         usage["available"] = False
     usage["cache_fetched_at"] = now
     usage["from_cache"] = False
@@ -205,9 +224,9 @@ def context_block(usage: Optional[Dict[str, Any]] = None) -> str:
 
 def _delegation_for_context() -> dict:
     try:
-        from hermes_cli.config import load_config
+        from hermes_cli.config import load_config_readonly
 
-        return (load_config() or {}).get("delegation") or {}
+        return (load_config_readonly() or {}).get("delegation") or {}
     except Exception:
         return {}
 

@@ -87,9 +87,9 @@ class LastGateStringRegressionTests(IsolatedHomeTest):
         provider = VibeRelayProvider()
         provider.route_task(
             {
-                "goal": "x",
+                "goal": "PRIVATE_PROVIDER_GOAL_SENTINEL",
                 "allowed": "textutil/**",
-                "gate": "python .devframework/check.py finish",
+                "gate": "PRIVATE_PROVIDER_GATE_SENTINEL",
                 "lane": "executor",
             },
             {
@@ -105,10 +105,11 @@ class LastGateStringRegressionTests(IsolatedHomeTest):
         state = load_state()
         self.assertIsInstance(state.get("last_gate"), dict)
         self.assertEqual(state["last_gate"].get("passed"), True)
-        self.assertEqual(
-            state.get("last_gate_command"),
-            "python .devframework/check.py finish",
-        )
+        self.assertIsNone(state.get("last_gate_command"))
+        self.assertNotIn("gate", state.get("last_route", {}))
+        self.assertNotIn("goal", state.get("last_route", {}))
+        self.assertNotIn("PRIVATE_PROVIDER_GOAL_SENTINEL", str(state))
+        self.assertNotIn("PRIVATE_PROVIDER_GATE_SENTINEL", str(state))
 
 
 class DfHandlerStringArgsTests(IsolatedHomeTest):

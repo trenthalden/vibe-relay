@@ -39,6 +39,9 @@ class CronParkGuardTests(IsolatedHomeTest):
         from executor_lane import clear_child_registry
 
         clear_child_registry()
+        self._active_provider = mock.patch("quota.active_provider_slug", return_value="anthropic")
+        self._active_provider.start()
+        self.addCleanup(self._active_provider.stop)
         self._prev_cron = os.environ.get("HERMES_CRON_SESSION")
         os.environ.pop("HERMES_CRON_SESSION", None)
 
@@ -171,7 +174,9 @@ class CronParkGuardTests(IsolatedHomeTest):
             calls.append((tool, dict(args)))
             return '{"success": true, "job_id": "nope"}'
 
-        with mock.patch("park.cron_scheduling_blocked", return_value=True):
+        with mock.patch("park.cron_scheduling_blocked", return_value=True), mock.patch(
+            "quota.active_provider_slug", return_value="openai-codex"
+        ):
             out = park(repo=str(repo), note="manual", dispatch=dispatch)
             out2 = vibe_command(f"park {repo} --note manual2", dispatch=dispatch)
 

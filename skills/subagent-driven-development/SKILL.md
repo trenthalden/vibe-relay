@@ -107,7 +107,7 @@ Each gate needs a defined entry condition, failure behavior and resumption rule.
 
 - **Plans** feed this skill; this skill executes them.
 - **`test-driven-development`:** include the TDD instructions (or the agreed evidence method) in every implementer brief.
-- **`lean-executor-orchestration`:** when a single external coding agent is the sole writer, prefer its one-brief, one-receipt loop instead.
+- **`lean-executor-orchestration`:** when a single external coding agent is the sole writer, prefer its one-brief, one-receipt loop instead; for several concurrent writers use its `lean-executor-orchestration/references/parallel-worktree-lanes.md`, and for an unattended overnight queue use `night-shift`.
 - **`systematic-debugging`:** use when a subagent hits a bug.
 
 ## Remember

@@ -197,24 +197,13 @@ class ExecutorLaneEnforceTests(IsolatedHomeTest):
             )
         self.assertIsNone(d)
 
-    def test_config_text_fallback_parses_backend(self):
-        from executor_lane import _parse_delegation_from_config_text
+    def test_readonly_config_load_is_used_for_delegation(self):
+        from executor_lane import load_delegation_config
+        from hermes_cli import config
 
-        text = (
-            "model:\n  default: x\n"
-            "delegation:\n"
-            "  backend: vibe-relay\n"
-            "  backends:\n"
-            "    vibe-relay:\n"
-            "      policy: auto\n"
-            "      enforce_executor_lane: true\n"
-            "      self_remaining_threshold: 51\n"
-        )
-        d = _parse_delegation_from_config_text(text)
-        self.assertEqual(d.get("backend"), "vibe-relay")
-        own = d["backends"]["vibe-relay"]
-        self.assertEqual(own.get("policy"), "auto")
-        self.assertIs(own.get("enforce_executor_lane"), True)
+        expected = {"backend": "vibe-relay", "backends": {"vibe-relay": {"policy": "auto"}}}
+        with mock.patch.object(config, "load_config_readonly", return_value={"delegation": expected}):
+            self.assertEqual(load_delegation_config(), expected)
 
 
 if __name__ == "__main__":

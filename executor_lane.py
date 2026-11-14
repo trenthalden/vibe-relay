@@ -88,83 +88,21 @@ def is_child_caller(*, session_id: str = "", task_id: str = "", **_kwargs: Any) 
         return bool(candidates & _active_child_ids)
 
 
-def _parse_delegation_from_config_text(text: str) -> Dict[str, Any]:
-    """Minimal parse of the ``delegation:`` section (no YAML dependency)."""
-    out: Dict[str, Any] = {"backends": {"vibe-relay": {}}}
-    # Prefer the top-level delegation.backend (first `backend:` under a delegation: block).
-    m = re.search(
-        r"(?ms)^delegation:\s*\n(?:^[ \t].*\n)*?[ \t]+backend:\s*([^\s#]+)",
-        text,
-    )
-    if m:
-        out["backend"] = m.group(1).strip().strip("\"'")
-    else:
-        m2 = re.search(r"(?m)^\s*backend:\s*(vibe-relay|vibe_relay)\s*$", text)
-        if m2:
-            out["backend"] = m2.group(1)
-    own = out["backends"]["vibe-relay"]
-    for key in (
-        "policy",
-        "self_remaining_threshold",
-        "stop_used_percent",
-        "executor_provider",
-        "executor_model",
-        "executor_profile",
-        "park_buffer_seconds",
-        "quota_provider",
-        "enforce_executor_lane",
-    ):
-        km = re.search(rf"(?m)^\s*{re.escape(key)}:\s*(.+?)\s*$", text)
-        if not km:
-            continue
-        raw = km.group(1).strip().strip("\"'")
-        if raw.lower() in {"true", "false"}:
-            own[key] = raw.lower() == "true"
-        else:
-            try:
-                own[key] = float(raw) if "." in raw else int(raw)
-            except ValueError:
-                own[key] = raw
-    return out
-
-
 def load_delegation_config() -> Dict[str, Any]:
-    """Best-effort read of ``delegation`` from the active Hermes home config."""
+    """Best-effort read of ``delegation`` from the active Hermes config."""
     try:
-        from hermes_cli.config import load_config
+        from hermes_cli.config import load_config_readonly
 
-        cfg = load_config() or {}
+        cfg = load_config_readonly() or {}
         delegation = cfg.get("delegation")
-        if isinstance(delegation, dict) and delegation:
-            return dict(delegation)
+        return dict(delegation) if isinstance(delegation, dict) else {}
     except Exception as exc:
-        logger.debug("vibe-relay: load_config failed: %s", exc)
-
-    try:
-        from hermes_constants import get_hermes_home
-
-        path = get_hermes_home() / "config.yaml"
-        if path.is_file():
-            return _parse_delegation_from_config_text(path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.debug("vibe-relay: config.yaml fallback failed: %s", exc)
-    return {}
+        logger.debug("vibe-relay: read-only config load failed: %s", type(exc).__name__)
+        return {}
 
 
 def vibe_relay_is_active_backend(delegation: Optional[Mapping[str, Any]] = None) -> bool:
-    """True when the saved / session delegation backend is vibe-relay."""
-    # Public surface: agent.delegation_backends.saved_backend()
-    try:
-        from agent.delegation_backends import saved_backend
-
-        name = str(saved_backend() or "").strip().lower()
-        if name in {"vibe-relay", "vibe_relay"}:
-            return True
-        if name and name not in {"", "default"}:
-            return False
-    except Exception as exc:
-        logger.debug("vibe-relay: saved_backend failed: %s", exc)
-
+    """True when the configured delegation backend is vibe-relay."""
     delegation = dict(delegation) if delegation is not None else load_delegation_config()
     backend = str(delegation.get("backend") or "").strip().lower()
     return backend in {"vibe-relay", "vibe_relay"}

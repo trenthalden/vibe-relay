@@ -48,6 +48,18 @@ def _on_api_request_error(**kwargs):
 
 
 def _on_post_tool_call(tool_name="", args=None, result=None, **kwargs):
+    # Night parent-stamp first (fail open). cost: ≤1 state write / 60s when night active.
+    try:
+        from night import post_tool_call_stamp
+
+        post_tool_call_stamp(
+            tool_name=tool_name,
+            ctx=_PLUGIN_CTX,
+            **kwargs,
+        )
+    except Exception as exc:
+        logger.warning("vibe-relay night post_tool_call failed open: %s", exc)
+
     if tool_name not in {"terminal", "run_terminal", "shell"}:
         return None
     try:
@@ -92,7 +104,6 @@ def _on_subagent_stop(**kwargs):
             last_subagent={
                 "child_session_id": kwargs.get("child_session_id"),
                 "child_status": kwargs.get("child_status"),
-                "child_summary": str(kwargs.get("child_summary") or "")[:300],
             }
         )
     except Exception as exc:
@@ -101,10 +112,26 @@ def _on_subagent_stop(**kwargs):
 
 
 def _on_pre_tool_call(tool_name="", args=None, task_id="", session_id="", **kwargs):
-    """Stop-at-threshold first, then executor-lane write block."""
+    """Night dispatch/reserve block first, then stop-at-threshold, then executor-lane."""
     from tool_args import coerce_tool_args
 
     args = coerce_tool_args(args)
+    # cost: hook work per tool call; quota reads bounded by quota.py TTL.
+    try:
+        from night import pre_tool_call_directive as night_directive
+
+        blocked = night_directive(
+            tool_name=tool_name,
+            args=args,
+            task_id=task_id,
+            session_id=session_id,
+            **kwargs,
+        )
+        if blocked:
+            return blocked
+    except Exception as exc:
+        logger.warning("vibe-relay night pre_tool_call failed open: %s", exc)
+
     try:
         from stop_park import pre_tool_call_directive as stop_directive
 
@@ -149,6 +176,7 @@ WORKSHOP_SKILL_NAMES = (
     "known-errors",
     "lean-executor-orchestration",
     "memory-engineering",
+    "night-shift",
     "product-aware-engineering-releases",
     "subagent-driven-development",
     "systematic-debugging",
@@ -189,6 +217,7 @@ def _reload_sibling_modules() -> None:
         "park",
         "executor_lane",
         "stop_park",
+        "night",
     )
     for name in names:
         mod = sys.modules.get(name)
@@ -206,6 +235,19 @@ def register(ctx) -> None:
     _reload_sibling_modules()
 
     from acceptance import VIBE_ACCEPT_SCHEMA, vibe_accept
+    from night import (
+        VIBE_NIGHT_ARM_SCHEMA,
+        VIBE_NIGHT_LOG_SCHEMA,
+        VIBE_NIGHT_REPORT_SCHEMA,
+        VIBE_NIGHT_START_SCHEMA,
+        VIBE_NIGHT_STATUS_SCHEMA,
+        night_command,
+        vibe_night_arm,
+        vibe_night_log,
+        vibe_night_report,
+        vibe_night_start,
+        vibe_night_status,
+    )
     from park import vibe_command
     from provider import VibeRelayProvider
     from tool_args import wrap_tool_handler
@@ -220,6 +262,31 @@ def register(ctx) -> None:
         description=VIBE_ACCEPT_SCHEMA["description"][:120],
         emoji="✅",
     )
+
+    def _night_tool(handler):
+        def _inner(args, **kwargs):
+            kwargs.setdefault("ctx", ctx)
+            if "dispatch" not in kwargs:
+                kwargs["dispatch"] = lambda tool, a: ctx.dispatch_tool(tool, a)
+            return handler(args, **kwargs)
+
+        return wrap_tool_handler(_inner)
+
+    for _schema, _handler, _emoji in (
+        (VIBE_NIGHT_START_SCHEMA, vibe_night_start, "🌙"),
+        (VIBE_NIGHT_LOG_SCHEMA, vibe_night_log, "📝"),
+        (VIBE_NIGHT_STATUS_SCHEMA, vibe_night_status, "📋"),
+        (VIBE_NIGHT_ARM_SCHEMA, vibe_night_arm, "⏰"),
+        (VIBE_NIGHT_REPORT_SCHEMA, vibe_night_report, "🌅"),
+    ):
+        ctx.register_tool(
+            name=_schema["name"],
+            toolset="vibe_relay",
+            schema=_schema,
+            handler=_night_tool(_handler),
+            description=_schema["description"][:120],
+            emoji=_emoji,
+        )
 
     # Vendored DEV Framework tools (skip if a separate dev-framework plugin already registered them).
     # Skills: DF registers df-import / df-catch-up from vendor/; workshop skills register below.
@@ -258,6 +325,16 @@ def register(ctx) -> None:
         handler=_cmd,
         description="Quota / mode / last gate / park status; `/vibe park` parks until reset.",
         args_hint="[status|park [repo] [--note text]]",
+    )
+
+    def _night_cmd(raw_args: str = "", **kwargs):
+        return night_command(raw_args, ctx=ctx)
+
+    ctx.register_command(
+        name="night",
+        handler=_night_cmd,
+        description="Night shift: start / status / arm / report / stop.",
+        args_hint="[start <HH:MM|ISO> [reserve%]|status|arm|report|stop]",
     )
 
     try:

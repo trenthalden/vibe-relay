@@ -4,6 +4,7 @@ from __future__ import annotations
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from support import IsolatedHomeTest, make_snapshot
 
@@ -35,7 +36,8 @@ class ParkTests(IsolatedHomeTest):
 
         buf = 120
         expected = schedule_iso(reset.isoformat(), buf)
-        out = park(repo=str(repo), note="pause here", dispatch=dispatch, buffer_seconds=buf)
+        with mock.patch("quota.active_provider_slug", return_value="openai-codex"):
+            out = park(repo=str(repo), note="pause here", dispatch=dispatch, buffer_seconds=buf)
         self.assertIn("PARKED", out)
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0][0], "cronjob_manage")
@@ -49,8 +51,64 @@ class ParkTests(IsolatedHomeTest):
         self.assertEqual(load_state().get("pending_park", {}).get("job_id"), "job-1")
 
         # Regression: pending_park must be cleared so a later /vibe park is not permanently skipped.
-        out2 = park(repo=str(repo), note="again", dispatch=dispatch, buffer_seconds=buf)
+        with mock.patch("quota.active_provider_slug", return_value="openai-codex"):
+            out2 = park(repo=str(repo), note="again", dispatch=dispatch, buffer_seconds=buf)
         self.assertIn("PARKED", out2)
         self.assertNotIn("SKIPPED", out2)
         self.assertEqual(len(calls), 2)
         self.assertEqual(load_state().get("pending_park", {}).get("job_id"), "job-2")
+
+    def test_vibe_status_does_not_echo_persisted_gate_text(self):
+        from park import status_text
+        from state import save_state
+
+        save_state({
+            "last_gate": {
+                "passed": True,
+                "tree_hash": "fixture-tree-hash",
+                "command": "PRIVATE_GATE_COMMAND_SENTINEL",
+                "excerpt": "PRIVATE_GATE_OUTPUT_SENTINEL",
+            },
+            "last_gate_command": "PRIVATE_ROUTE_COMMAND_SENTINEL",
+            "last_route": {"lane": "executor", "gate": "PRIVATE_ROUTE_GATE_SENTINEL"},
+        })
+        text = status_text()
+        self.assertIn("PASS @ fixture-tree-hash", text)
+        for marker in (
+            "PRIVATE_GATE_COMMAND_SENTINEL", "PRIVATE_GATE_OUTPUT_SENTINEL",
+            "PRIVATE_ROUTE_COMMAND_SENTINEL", "PRIVATE_ROUTE_GATE_SENTINEL",
+        ):
+            self.assertNotIn(marker, text)
+
+    def test_default_handoff_does_not_copy_legacy_gate_or_task_text(self):
+        from park import park
+        from state import save_state
+
+        repo = Path(tempfile.mkdtemp(prefix="vibe-park-private-state-"))
+        self.addCleanup(lambda: __import__("shutil").rmtree(repo, ignore_errors=True))
+        (repo / "docs").mkdir()
+        save_state({
+            "last_gate": {
+                "passed": True, "tree_hash": "fixture-tree-hash",
+                "command": "PRIVATE_HANDOFF_COMMAND_SENTINEL",
+                "excerpt": "PRIVATE_HANDOFF_OUTPUT_SENTINEL",
+            },
+            "last_route": {
+                "lane": "executor", "reason": "fixture",
+                "goal": "PRIVATE_HANDOFF_GOAL_SENTINEL",
+                "gate": "PRIVATE_HANDOFF_GATE_SENTINEL",
+            },
+        })
+
+        def dispatch(_tool, _args):
+            return '{"success": true, "job_id": "job-private-state"}'
+
+        reset = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        park(repo=str(repo), dispatch=dispatch, reset_at=reset)
+        handoff = (repo / "docs" / "vibe-park.md").read_text(encoding="utf-8")
+        self.assertIn("fixture-tree-hash", handoff)
+        for marker in (
+            "PRIVATE_HANDOFF_COMMAND_SENTINEL", "PRIVATE_HANDOFF_OUTPUT_SENTINEL",
+            "PRIVATE_HANDOFF_GOAL_SENTINEL", "PRIVATE_HANDOFF_GATE_SENTINEL",
+        ):
+            self.assertNotIn(marker, handoff)

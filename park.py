@@ -74,9 +74,9 @@ def in_cron_session() -> bool:
 def agent_scheduling_allowed() -> bool:
     """``cron.allow_agent_scheduling`` from Hermes config (default false)."""
     try:
-        from hermes_cli.config import load_config
+        from hermes_cli.config import load_config_readonly
 
-        cron = (load_config() or {}).get("cron") or {}
+        cron = (load_config_readonly() or {}).get("cron") or {}
         return bool(cron.get("allow_agent_scheduling"))
     except Exception:
         return False
@@ -172,10 +172,18 @@ def park(
                 f"job_id: {existing.get('job_id')}"
             )
 
+    state = load_state()
+    gate = as_dict(state.get("last_gate"))
+    safe_gate = {
+        "passed": bool(gate.get("passed")),
+        "tree_hash": str(gate.get("tree_hash") or "")[:64],
+    } if gate else {}
+    route = as_dict(state.get("last_route"))
+    safe_route = {key: route[key] for key in ("lane", "reason") if key in route}
     handoff_note = note or (
         f"Quota window nearly exhausted. Resume after reset ({reset}).\n"
-        f"Last gate: {json.dumps(as_dict(load_state().get('last_gate')), default=str)}\n"
-        f"Last route: {json.dumps(load_state().get('last_route') or {}, default=str)}\n"
+        f"Last gate: {json.dumps(safe_gate, default=str)}\n"
+        f"Last route: {json.dumps(safe_route, default=str)}\n"
         "Re-read this handoff, check /vibe status, then continue the open task."
     )
     handoff_path = write_handoff(repo=root, note=handoff_note)
@@ -264,8 +272,8 @@ def _extract_job_id(text: str) -> Optional[str]:
 
 def _delegation_config() -> dict:
     try:
-        from hermes_cli.config import load_config
-        return (load_config() or {}).get("delegation") or {}
+        from hermes_cli.config import load_config_readonly
+        return (load_config_readonly() or {}).get("delegation") or {}
     except Exception:
         return {}
 
@@ -288,13 +296,11 @@ def status_text() -> str:
     gate = as_dict(state.get("last_gate"))
     if gate:
         lines.append(
-            f"last gate: {'PASS' if gate.get('passed') else 'FAIL/unknown'} @ {gate.get('tree_hash')} "
-            f"cmd={gate.get('command', '')[:80]}"
+            f"last gate: {'PASS' if gate.get('passed') else 'FAIL/unknown'} @ {gate.get('tree_hash')}"
         )
     else:
-        cmd = state.get("last_gate_command") or (state.get("last_route") or {}).get("gate")
-        if cmd:
-            lines.append(f"last gate: (no PASS record yet) cmd={str(cmd)[:80]}")
+        if state.get("last_gate_command") or (state.get("last_route") or {}).get("gate"):
+            lines.append("last gate: (no PASS record yet)")
         else:
             lines.append("last gate: (none)")
     park = as_dict(state.get("pending_park")) if state.get("pending_park") else {}

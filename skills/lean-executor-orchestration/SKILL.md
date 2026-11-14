@@ -1,7 +1,7 @@
 ---
 name: lean-executor-orchestration
 description: Use when delegating code. Dispatch once; accept receipt.
-version: 1.0.0
+version: 2.0.0
 author: trenthalden
 ---
 
@@ -9,94 +9,123 @@ author: trenthalden
 
 ## When to Use
 
-Use for a bounded development task delegated to a coding agent (for example Cursor), or for a narrowly triggered read-only review by a second model (for example Claude).
+A bounded development task goes to a coding worker (an external coding CLI or a Hermes child via `delegate_task`), or a
+narrowly triggered read-only review goes to a second model. For a whole unattended night of such tasks, add `night-shift`.
 
 ## Goal
 
-The executor spends the implementation tokens and tool calls. The orchestrator sends **one closed brief**, receives a **compact receipt**, and decides: accept, one correction, or block. Do not build an orchestration platform for normal development tasks.
+The worker spends the implementation tokens. The orchestrator sends **one closed brief**, gets a **compact receipt**, and
+decides: accept, one correction, or block. Do not build an orchestration platform for normal development.
 
 ## Roles
 
-- **Executor (coding agent):** sole writer of source, tests, builds and task-scoped documentation.
-- **Reviewer model:** read-only plan or review, only for a multi-component change or a change touching security, authority, memory, delivery, runtime or installation. Not a default second pass.
-- **Orchestrator:** dispatches, checks the receipt and the *actual* delta, then accepts, corrects once or blocks. Does not recreate the implementation work.
-- **Owner:** resolves blocked work and separately authorizes commit, push, installation, restart or deployment.
+- **Worker:** the only writer of source, tests and task-scoped docs in its tree.
+- **Reviewer model:** read-only plan or review, only for multi-component changes or changes to security, authority, memory,
+  delivery, runtime or installation boundaries. Not a default second pass.
+- **Orchestrator:** dispatches, checks the receipt and the *actual* delta, accepts / corrects once / blocks. Does not redo
+  the implementation.
+- **Owner:** resolves blocked work; separately authorizes commit, push, install, restart, deploy.
+
+## Choosing the worker
+
+- Ask the owner once per assignment if they have not named a worker; reuse the recorded choice for continuations.
+- Long vertical portions go to the strongest worker; small, sharply bounded portions (tests-only fixes, mechanical edits, one
+  small guard) suit cheaper or smaller models. A no-edit decline on a large refactor is a sizing signal: re-scope once, then
+  move the portion, do not retry the same brief.
+- Switching workers mid-task: stop the old writer at a safe point, verify it released the tree, keep its partial delta, and
+  give the new worker one continuation brief. Never two writers at once. Switching does not reset the correction budget.
 
 ## Dispatch
 
-1. Capture the working-tree state without changing it.
-2. Send one self-contained brief with `INTENT`, `DECISIONS`, `ALLOWED`, `FORBIDDEN`, `TASK`, `DONE MEANS`, one `GATE`, a one-pass limit and the required receipt fields.
-3. Require the final receipt: `FILES`, `GATE` command and result, `BOUNDARIES`, residual risk.
-4. Run one executor session. If acceptance fails, send one resume/correction with the exact observed error. Do not start a fresh review cascade.
+1. Capture the working-tree state without changing it. Check that no other writer owns the tree (process list, live children).
+2. One self-contained brief: `INTENT`, `DECISIONS`, `ALLOWED`, `FORBIDDEN`, `TASK`, `DONE MEANS`, one `GATE`, one-pass limit,
+   receipt fields. Put rules shared by several briefs in one `COMMON.md`.
+3. Launch with **only the executor command the repository approves**. Never infer from an example that approval-bypass flags
+   (`--force`, `--yolo`, `--trust` and similar) are allowed; where the repository does not allow them, use the normal approval
+   path or report the blocker.
+4. External CLI workers: run as a tracked background process with a hard wall and its own session, so a host restart does not
+   kill it; keep pid and output under the project's ignored temp dir; unset the host's `HERMES_HOME` and set an explicit
+   `TMPDIR`, so a worker that runs `hermes` uses an isolated home. Confirm the process exists ~20 s after launch — an earlier
+   exit is a launch failure, not a correction run.
+5. Hermes children: use `delegate_task` and its lifecycle; do not wrap a child in a CLI launcher.
 
 ### Hermes + vibe-relay
 
-When the active delegation backend is `vibe-relay`, do **not** edit the failing code in the parent turn. Call `delegate_task` once with:
-
-- `goal` — the closed brief (or a short plain-language task)
-- `allowed` — path globs the child may change (required; e.g. `textutil/**`)
-- `gate` — one shell command that must PASS on the real diff (required; e.g. `python -m unittest discover -s tests -v`)
-- `lane` — `auto` unless the owner forced otherwise
-
-After the child returns: run the gate yourself if needed, then `vibe_accept`. Refuse to widen `allowed` to “fix” an out-of-scope edit.
+With the `vibe-relay` delegation backend, do **not** edit failing code in the parent turn. Call `delegate_task` once with
+`goal` (the brief), `allowed` (path globs), `gate` (one command that must pass on the real diff) and `lane` (`auto` unless the
+owner forced otherwise). After the child returns, rerun the gate if required, then `vibe_accept`. Never widen `allowed` to
+legalize an out-of-scope edit. At the stop threshold the plugin parks the work and can arm `resume-after-reset`.
 
 ### Brief template
 
 ```text
-INTENT: <one sentence>
-DECISIONS: <already made; do not reopen>
-ALLOWED: <paths/globs>
+INTENT: <one sentence: why>
+DECISIONS: <already made; do not reopen; pinned interfaces>
+ALLOWED: <paths/globs owned by this worker>
 FORBIDDEN: commit, push, install, service/config/runtime changes, paths outside ALLOWED
 TASK: <2–5 concrete steps>
 DONE MEANS: <observable outcome>
-GATE: <one command>
+GATE: <exact commands, run from the worker's tree>
 LIMIT: one pass; stop with the blocker if incomplete
-RECEIPT: FILES; GATE command + concise result; BOUNDARIES ok|exception; residual risk
+RECEIPT: FILES; GATE commands + results; BOUNDARIES ok|exception; OPEN; RISKS
 ```
-
-### Periodic simplicity checkpoint
-
-At each outcome-sized iteration boundary, after two unsuccessful correction/review rounds, or after about 30 minutes of engineering without a new useful functional result, spend **at most five minutes** critically checking architecture *and* test scope. Ask which layers/options protect a current requirement, which tests duplicate the harness, and which existing simpler path can deliver the outcome. Record only keep / cut / defer, the next functional run and safety constraints in the existing checklist. Trigger it immediately if verification/coordination outweighs implementation.
-
-Do not add a reviewer, audit document, timer, service or gate for the checkpoint. Never simplify away privacy, authority, data integrity, resource bounds or Stop.
 
 ## Acceptance
 
-For agent projects, use a short safety smoke, then let the **real agent** perform the authorized functional task through its actual executor; independently verify tool effects and artifacts. Synthetic replies prove plumbing only. Do not require exhaustive timing/queue/failure matrices or a polished regression harness before a harmless disposable functional run. A demonstrated critical safety defect still blocks its affected operation. Keep required completion/release gates and explicit deployment permissions. A missing worker receipt limits *source* acceptance but is not a blanket ban on otherwise safe, authorized functional observation.
-
 Accept only when:
 
-1. the receipt exists;
-2. actual changed paths match `FILES` and stay inside `ALLOWED`;
-3. the stated gate is the gate from the brief and succeeds;
-4. `DONE MEANS` follows from the delta and the gate;
-5. a risk-triggered independent gate rerun, when required, succeeds.
+1. the receipt exists and its `FILES` match the actual changed paths, all inside `ALLOWED`;
+2. the gate is the brief's gate and passes **when you run it** in the project's interpreter;
+3. `DONE MEANS` follows from the delta, not from the receipt's wording;
+4. the production path contains no fixture, fake, placeholder or empty-policy object that only makes tests green;
+5. every external consumer of a changed message or schema still accepts it.
 
-Rerun the gate independently only when the task changes a security, authority, memory, delivery or runtime boundary; changes the gate itself; or has a receipt that conflicts with the actual delta. Do not add synthetic edge-case suites for normal work.
+Accept a portion before dispatching the next brief that depends on it. Read the diff for relaxed shared rules (a filter,
+guard, ordering, or a checklist item owned by someone else); one correction restores them with a narrow exemption and a
+test. When an asynchronous review arrives, check it against the current code before acting — it may describe an older tree.
+Details: `references/acceptance-checklist.md`.
+
+For agent projects, prove behaviour with a short safety smoke and then one real authorized run of the actual agent; synthetic
+replies prove plumbing only. Do not demand exhaustive timing or failure matrices before a harmless disposable functional run.
+
+## Parallel lanes
+
+Two or more writers only in separate detached worktrees with disjoint file ownership; the parent integrates. See
+`references/parallel-worktree-lanes.md`.
+
+## Long runs and quota
+
+- Budget the whole run, not the next call: parent review is usually the bottleneck. Stop dispatching at the owner's reserve
+  (default 90 % used) and keep enough to checkpoint.
+- Arm one continuation at the start of a long window, just after the known quota reset — not after the quota is gone.
+  Scheduled jobs run on the profile's default model; make sure that model has quota, or have the owner pin the job.
+- Keep one canonical handoff (checklist with timeline and decisions); a fresh session must be able to continue from it alone.
+- Overnight: use `night-shift`.
 
 ## Stop rules
 
-- At most **two executor runs** per task: original plus one correction.
+- At most **two** worker runs per task: original plus one correction. Renaming a third pass does not reset the budget.
 - At most **one** reviewer-model pass, only when its trigger applies.
-- A forbidden effect, second failure or ambiguous outcome is `BLOCKED` for the owner. Do not widen scope, add agents or retry indefinitely.
-- Keep any owner-set quota reserve in force.
+- A forbidden effect, second failure or ambiguous outcome is `BLOCKED` for the owner. Do not widen scope, add agents or
+  retry indefinitely.
 
 ## Lessons from operation
 
-- **Launch the executor in a mode that allows its shell calls** (for Cursor: `cursor-agent --print --force "$(cat brief.md)"` as a notified background process). Without it, shell calls are rejected, the worker cannot run its gate, and the receipt is an implementation receipt, not verification.
-- **One writer at a time.** Queue the next brief behind the running worker (`while kill -0 <pid>; do sleep 15; done; <next run>`). Two writers in one tree collide on files and on the shared full gate. Also check the process tree for duplicate resumed sessions on the same worktree before a write phase.
-- **Measure a runtime knob before building on it.** A few live read-only calls show whether a documented parameter (thinking off, token cap) is honoured. Before changing a config value, grep the pinned framework for hard floors on that key; a value below a startup floor passes unit tests and stops the agent at start.
-- **Diagnose a live failure from service logs first:** tool names, error classes, timestamps — never message content. Repeated identical errors across retries of one event usually mean the host retries a turn that can never succeed; record a host defect instead of only scoring the model.
-- **Stop patching around a model.** If the same agent fails the same natural task after two host-side fixes, report a model/architecture-fit problem and propose the larger change instead of a third workaround.
-- **Read the diff, not only the receipt.** Workers sometimes relax a shared rule (a filter, an ordering query, a guard) to make their feature pass. One correction restores it with a narrow exemption and a regression test.
-- **RED evidence must reach the promised assertion.** A new automated regression detector must fail on the relevant old/broken behavior, not on syntax/import/attribute errors. Ordinary functional observations and real-agent runs do not first need planted faults. A script that successfully observes the old limitation is not a failing success assertion.
-- **Your gate, your interpreter.** Before a commit, rerun the full gate in the parent environment. A worker's shell may resolve a different `python3`; a module that imports a pinned runtime can pass in the worker's receipt and fail under the project's host interpreter.
-- **Verification shells fail closed:** start multi-step gates with `set -euo pipefail`; print the success marker only after all assertions.
-
-## Optional journal
-
-Use a task board only as a manual status journal when several independent tasks are active. Do not make it a required transport layer or build a custom runner/MCP integration unless the owner explicitly reopens that work.
+- **Measure a runtime knob before building on it.** A few live read-only calls show whether a documented parameter is
+  honoured; grep the framework for hard floors before changing a config value.
+- **Diagnose live failures from service logs** (tool names, error classes, timestamps — never message content). Identical
+  errors across retries usually mean the host retries a turn that cannot succeed.
+- **Stop patching around a model.** After two host-side fixes for the same failing natural task, report a model/architecture
+  fit problem instead of adding a third workaround.
+- **RED evidence must reach the promised assertion**, not fail on an import or syntax error.
+- **Your gate, your interpreter.** A worker's shell may resolve a different `python3`; rerun the full gate in the parent
+  environment before any commit.
+- **Verification shells fail closed:** `set -euo pipefail`; print the success marker only after all assertions.
+- **Simplicity checkpoint:** at an iteration boundary, after two failed rounds, or ~30 minutes without a new functional
+  result, spend at most five minutes asking which layers and tests protect a current requirement; record keep / cut / defer.
+  Never simplify away privacy, authority, data integrity, resource bounds or Stop.
 
 ## Limits
 
-This is a cooperative workflow, not a sandbox. An executor may technically write outside scope; the post-run path check detects it rather than preventing it. Backend-compute cancellation proof, full crash recovery and adversarial executor containment are separate work, not prerequisites for lean delegation.
+A cooperative workflow, not a sandbox. A worker can technically write outside scope; the post-run path check detects it.
+Cancellation proof, crash recovery and adversarial containment are separate work.

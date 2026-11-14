@@ -129,7 +129,6 @@ def capture_terminal_gate(
     """If terminal output looks like a gate PASS/FAIL, bind it to the tree hash."""
     args = coerce_tool_args(args)
     result = result or ""
-    cmd = str(args.get("command") or args.get("cmd") or "")
     if not looks_like_pass(result) and "FINISH" not in result.upper() and "passed" not in result.lower():
         # Still record FAIL for FINISH NOT READY etc.
         if not re.search(r"FINISH|PASSED|FAILED|Ran \d+ tests", result, re.I):
@@ -137,10 +136,8 @@ def capture_terminal_gate(
     tree = working_tree_hash(cwd or args.get("workdir") or args.get("cwd"))
     passed = looks_like_pass(result)
     record = {
-        "command": cmd[:500],
         "passed": passed,
         "tree_hash": tree,
-        "excerpt": (result or "")[-1200:],
     }
     update_state(last_gate=record)
     return record

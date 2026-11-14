@@ -9,6 +9,7 @@
 - `subagent-driven-development`: Use when executing plans via reviewed subagent tasks.
 - `agent-maintenance`: Use when maintaining a long-lived companion agent.
 - `lean-executor-orchestration`: Use when delegating code. Dispatch once; accept receipt.
+- `night-shift`: Use when leaving an agent alone overnight on a big project.
 - `agent-field-acceptance`: Use when proving agent work with field-first acceptance.
 - `test-driven-development`: Use when testing code or agents. Choose minimal evidence.
 - `systematic-debugging`: Use when debugging. Find root cause before fixing.

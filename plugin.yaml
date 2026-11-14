@@ -1,15 +1,21 @@
 name: vibe-relay
-version: 0.3.2
+version: 0.4.0
 description: >
   Vibecoding without burning your best model: quota-aware self vs cheap executor
   delegation, gate-bound acceptance, enforced stop-at-threshold with auto
-  park/resume across usage-window resets, and an Agent Workshop skill pack for
-  building and running long-lived agents.
+  park/resume across usage-window resets, a night shift for large projects
+  (hard stop, quota-checked continuation wakes, morning report from records),
+  and an Agent Workshop skill pack for building and running long-lived agents.
 author: trenthalden
 homepage: https://github.com/trenthalden/vibe-relay
 requires_hermes: ">=0.22.5"
 provides_tools:
   - vibe_accept
+  - vibe_night_start
+  - vibe_night_log
+  - vibe_night_status
+  - vibe_night_arm
+  - vibe_night_report
   - df_init
   - df_check
   - df_nav

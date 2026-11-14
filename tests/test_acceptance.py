@@ -26,10 +26,17 @@ class GateCaptureTests(IsolatedHomeTest):
 
         (repo / "a.py").write_text("x=2\n", encoding="utf-8")
         tree = working_tree_hash(str(repo))
-        out = "FINISH PASSED: 1 commands; 1 tests, 0 skipped\n"
-        rec = capture_terminal_gate(args={"command": "python -m check finish", "cwd": str(repo)}, result=out, cwd=str(repo))
+        out = "FINISH PASSED: 1 commands; 1 tests, 0 skipped\nPRIVATE_GATE_OUTPUT_SENTINEL\n"
+        rec = capture_terminal_gate(
+            args={"command": "echo PRIVATE_GATE_COMMAND_SENTINEL", "cwd": str(repo)},
+            result=out,
+            cwd=str(repo),
+        )
         self.assertTrue(rec["passed"])
         self.assertEqual(rec["tree_hash"], tree)
+        from state import load_state
+        self.assertNotIn("PRIVATE_GATE_COMMAND_SENTINEL", str(load_state()))
+        self.assertNotIn("PRIVATE_GATE_OUTPUT_SENTINEL", str(load_state()))
         self.assertTrue(fresh_pass_for_tree(str(repo)))
         self.assertIsNone(pre_verify_directive(changed_paths_arg=["a.py"], cwd=str(repo)))
 

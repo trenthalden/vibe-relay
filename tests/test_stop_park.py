@@ -34,6 +34,9 @@ class StopParkEnforceTests(IsolatedHomeTest):
         from executor_lane import clear_child_registry
 
         clear_child_registry()
+        self._active_provider = mock.patch("quota.active_provider_slug", return_value="anthropic")
+        self._active_provider.start()
+        self.addCleanup(self._active_provider.stop)
 
     def tearDown(self):
         from executor_lane import clear_child_registry

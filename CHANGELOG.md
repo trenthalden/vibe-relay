@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+
+- **Night shift** for large projects left overnight: `vibe_night_start` / `vibe_night_log` / `vibe_night_status` /
+  `vibe_night_arm` / `vibe_night_report` and `/night start|status|arm|report|stop`. Plan, queue, decisions and timeline live in
+  a self-ignored `<repo>/.vibe-relay/night-<stamp>/`; a `pre_tool_call` hard stop refuses new dispatch after the window or at
+  the quota reserve; a `post_tool_call` liveness stamp lets continuation wakes exit instead of becoming a second
+  orchestrator; wakes are armed once from the live session through `cronjob_manage` after a quota preflight on the provider
+  the job will run on; the morning report is assembled from records.
+- **Skills:** new `night-shift`; `lean-executor-orchestration` 2.0.0 (worker choice and switching, approved executor command
+  only — the old approval-bypass launch recipe is gone, detached launches with an isolated home, acceptance before dependent
+  dispatch, `references/parallel-worktree-lanes.md`, `references/acceptance-checklist.md`). Skill tests check referenced files,
+  English-only public text and no approval-bypass recipes.
+- **Public surfaces only:** Hermes config is read with the documented `load_config_readonly`; the backend check no longer
+  imports `agent.delegation_backends` nor parses `config.yaml` by hand. A test fails on any undocumented core import.
+- **Privacy:** gate records and handoffs keep only pass/fail + tree hash and allowlisted route metadata — no gate command,
+  gate output or task text; the quota cache never substitutes a cached provider and drops raw payloads.
+
 ## 0.3.2
 
 - **Review fixes (teknium1 / PR #150547):** confine checklist/handoff slugs in vendored `navigate.py` (and park handoff) to `[A-Za-z0-9._-]+` with a resolved-path check under `root/docs` before any read/write/unlink; respect the Hermes cron loop guard (`HERMES_CRON_SESSION` + `cron.allow_agent_scheduling`) so auto-park and `/vibe park` do not schedule a resume timer from a cron session unless the gate is on (block message says so); drop private `agent.account_usage_cache.cached_account_usage` and keep only public `fetch_account_usage(..., read_only=True)` with the 15 s negative TTL; `df_init` also refuses `$HOME` itself and filesystem root.

@@ -731,7 +731,7 @@ def probe_vibe_accept(cwd: Path, allowed: str) -> str:
     return f"REJECT: vibe_accept probe failed\n{(cp.stderr or cp.stdout or '')[-800:]}"
 
 
-def seed_gate_pass(cwd: Path, gate_output: str) -> None:
+def seed_gate_pass(cwd: Path) -> None:
     """Write a fresh PASS into plugin state for the current tree (scripted negative)."""
     py = hermes_python()
     env = plugin_python_env()
@@ -739,16 +739,15 @@ def seed_gate_pass(cwd: Path, gate_output: str) -> None:
         "import sys\n"
         "from acceptance import working_tree_hash\n"
         "from state import update_state\n"
-        "cwd, allowed, cmd, excerpt = sys.argv[1:5]\n"
+        "cwd, allowed = sys.argv[1:3]\n"
         "update_state(\n"
         "  last_allowed=allowed,\n"
-        "  last_gate={'passed': True, 'tree_hash': working_tree_hash(cwd),\n"
-        "             'command': cmd, 'excerpt': excerpt},\n"
+        "  last_gate={'passed': True, 'tree_hash': working_tree_hash(cwd)},\n"
         ")\n"
         "print(working_tree_hash(cwd))\n"
     )
     subprocess.run(
-        [str(py), "-c", code, str(cwd), NEGATIVE_ALLOWED, GATE_CMD, gate_output[-500:]],
+        [str(py), "-c", code, str(cwd), NEGATIVE_ALLOWED],
         env=env,
         text=True,
         capture_output=True,
@@ -784,7 +783,7 @@ def scripted_negative_reject(run_dir: Path, toy_base: Path) -> Dict[str, Any]:
         encoding="utf-8",
     )
     gate = run_gate(toy)
-    seed_gate_pass(toy, (gate.stdout or "") + (gate.stderr or ""))
+    seed_gate_pass(toy)
     accept_text = probe_vibe_accept(toy, NEGATIVE_ALLOWED)
     changed = git_diff_names(toy)
     outside = [p for p in changed if not path_allowed(p, [NEGATIVE_ALLOWED])]
