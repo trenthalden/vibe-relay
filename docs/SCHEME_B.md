@@ -23,3 +23,10 @@ executor-lane behaviour is unchanged.
 
 **Load order:** without `requires_plugins` edges, Hermes loads plugins alphabetically by registry key, so
 `lean-orchestration` loads before `vibe-relay` when both are enabled — the skip path is the common case.
+
+The vendored skill is namespaced by the host plugin: `skill_view("vibe-relay:lean-orchestration")`
+(the standalone plugin exposes `lean-orchestration:lean-orchestration`).
+
+The vendored gate is executed fresh on every `register()`; a cached `lean_orchestration_vendored`
+module from an earlier install is never reused, because a long-lived gateway keeps `sys.modules`
+across plugin remove/install (live check 2026-11-20: the old object served the previous install's code).
