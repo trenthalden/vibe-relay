@@ -172,6 +172,19 @@ def dispatch(
     launch_path = os.path.join(run_dir, "launch.json")
     _atomic_json(launch_path, launch)
 
+    # JOB-3 / API-7: verify the supervisor script exists before spawning — a missing
+    # path used to fail only inside the child with stderr on DEVNULL (silent door).
+    if not os.path.isfile(SUPERVISE_PY):
+        return {
+            "ok": False,
+            "decision": "ERROR",
+            "reasons": ["supervisor_missing:%s" % SUPERVISE_PY],
+            "id": dispatch_id,
+            "run_dir": run_dir,
+            "gate": gate,
+            "profile": profile_name,
+        }
+
     # Start detached supervisor (JOB-2); plugin does not wait on the child.
     supervisor_argv = [
         python_bin,
@@ -180,15 +193,18 @@ def dispatch(
         "--run-dir",
         run_dir,
     ]
+    # API-7: keep supervisor stdout+stderr in run_dir (not DEVNULL) so a crash is visible.
+    supervisor_log_path = os.path.join(run_dir, "supervisor.log")
     try:
         # SEC-1: argv list; start_new_session so supervisor survives parent.
-        proc = subprocess.Popen(
-            supervisor_argv,
-            cwd=run_dir,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        with open(supervisor_log_path, "ab") as sup_log:
+            proc = subprocess.Popen(
+                supervisor_argv,
+                cwd=run_dir,
+                stdout=sup_log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
     except OSError as exc:
         return {
             "ok": False,
@@ -282,13 +298,32 @@ def _atomic_json(path: str, payload: Mapping[str, Any]) -> None:
     os.replace(tmp, path)
 
 
+def supervisor_log_tail(run_dir: str, *, max_chars: int = 300) -> str:
+    """Last ≤ ``max_chars`` of ``supervisor.log``, UTF-8 with ``errors='replace'``."""
+    path = os.path.join(run_dir, "supervisor.log")
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError:
+        return ""
+    if not raw:
+        return ""
+    text = raw.decode("utf-8", errors="replace")
+    if len(text) <= max_chars:
+        return text
+    return text[-max_chars:]
+
+
 def reconcile(data_dir: str) -> List[Dict[str, Any]]:
     """Reconcile open dispatches after restart (FR-017 / JOB-3).
 
     For each ``dispatched`` without ``ended``:
     - ``exit.json`` present → record ``ended``
     - supervisor pid alive → keep watching
-    - neither → ``ended`` with ``rc: null, evidence: supervisor_gone``
+    - neither → ``ended`` with ``rc: null``; ``evidence: supervisor_exited`` when
+      ``supervisor.log`` exists (with log tail), else ``supervisor_gone``
     """
     led = ledger_mod.ledger_path(data_dir)
     actions: List[Dict[str, Any]] = []
@@ -323,25 +358,50 @@ def reconcile(data_dir: str) -> List[Dict[str, Any]]:
         if ledger_mod.pid_alive(pid if isinstance(pid, int) else None):
             actions.append({"event": "watching", "id": dispatch_id, "pid": pid})
             continue
-        ended = {
-            "event": "ended",
-            "id": dispatch_id,
-            "executor": ev.get("executor"),
-            "workdir": ev.get("workdir"),
-            "brief_sha256": ev.get("brief_sha256"),
-            "task_sha256": ev.get("task_sha256"),
-            "pid": pid,
-            "pgid": ev.get("pgid"),
-            "started": ev.get("started"),
-            "timeout": ev.get("timeout"),
-            "run_dir": run_dir,
-            "rc": None,
-            "seconds": None,
-            "timed_out": False,
-            "receipt_present": os.path.isfile(os.path.join(run_dir, "RECEIPT.md")),
-            "ended": "",
-            "evidence": "supervisor_gone",
-        }
+        log_path = os.path.join(run_dir, "supervisor.log")
+        if os.path.isfile(log_path):
+            evidence = "supervisor_exited"
+            ended = {
+                "event": "ended",
+                "id": dispatch_id,
+                "executor": ev.get("executor"),
+                "workdir": ev.get("workdir"),
+                "brief_sha256": ev.get("brief_sha256"),
+                "task_sha256": ev.get("task_sha256"),
+                "pid": pid,
+                "pgid": ev.get("pgid"),
+                "started": ev.get("started"),
+                "timeout": ev.get("timeout"),
+                "run_dir": run_dir,
+                "rc": None,
+                "seconds": None,
+                "timed_out": False,
+                "receipt_present": os.path.isfile(os.path.join(run_dir, "RECEIPT.md")),
+                "ended": "",
+                "evidence": evidence,
+                "supervisor_log_tail": supervisor_log_tail(run_dir),
+            }
+        else:
+            evidence = "supervisor_gone"
+            ended = {
+                "event": "ended",
+                "id": dispatch_id,
+                "executor": ev.get("executor"),
+                "workdir": ev.get("workdir"),
+                "brief_sha256": ev.get("brief_sha256"),
+                "task_sha256": ev.get("task_sha256"),
+                "pid": pid,
+                "pgid": ev.get("pgid"),
+                "started": ev.get("started"),
+                "timeout": ev.get("timeout"),
+                "run_dir": run_dir,
+                "rc": None,
+                "seconds": None,
+                "timed_out": False,
+                "receipt_present": os.path.isfile(os.path.join(run_dir, "RECEIPT.md")),
+                "ended": "",
+                "evidence": evidence,
+            }
         # Also record reconciled marker for audit (DECISION 5).
         ledger_mod.append_event(led, ended)
         ledger_mod.append_event(
@@ -349,7 +409,7 @@ def reconcile(data_dir: str) -> List[Dict[str, Any]]:
             {
                 "event": "reconciled",
                 "id": dispatch_id,
-                "evidence": "supervisor_gone",
+                "evidence": evidence,
                 "run_dir": run_dir,
             },
         )
@@ -359,7 +419,7 @@ def reconcile(data_dir: str) -> List[Dict[str, Any]]:
 
 def format_completion_line(ended: Mapping[str, Any]) -> str:
     """One-line completion message for inject_message (DECISION 6)."""
-    return (
+    line = (
         "orch_dispatch ended id=%s executor=%s rc=%s seconds=%s receipt=%s run_dir=%s"
         % (
             ended.get("id"),
@@ -370,6 +430,14 @@ def format_completion_line(ended: Mapping[str, Any]) -> str:
             ended.get("run_dir"),
         )
     )
+    if ended.get("evidence") == "supervisor_exited" or "supervisor_rc" in ended:
+        run_dir = str(ended.get("run_dir") or "")
+        line = "%s supervisor_rc=%s see %s/supervisor.log" % (
+            line,
+            ended.get("supervisor_rc"),
+            run_dir,
+        )
+    return line
 
 
 def wait_for_exit(run_dir: str, *, timeout_s: float = 60.0, poll_s: float = 0.1) -> Optional[Dict[str, Any]]:

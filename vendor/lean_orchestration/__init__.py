@@ -12,15 +12,51 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Hyphenated plugin dir is not a normal import package name; put the plugin root on
 # sys.path so sibling modules resolve under Hermes load (same pattern as vibe-relay).
+#
+# Module isolation (KE-2026-11-20-STALE-TOPLEVEL-MODULES, live incident 2026-11-20):
+# Hermes loads each plugin as a package with submodule_search_locations and evicts
+# stale ``<plugin>.*`` on reload, but our top-level ``lo_core`` / ``lo_exec`` names
+# escape that eviction. A prior standalone install left those modules cached; the
+# vendored copy's ``import lo_exec`` then reused a SUPERVISE_PY that pointed into the
+# deleted tree, so the supervisor died immediately with stderr on DEVNULL and the
+# waiter only saw ``evidence: supervisor_exited`` / ``rc=None``. Force this copy's
+# root to sys.path[0] and drop every foreign ``lo_core`` / ``lo_exec`` entry before
+# importing. CFG-1 / SEC-2: exactly one copy of this code serves a plugin instance.
 PACKAGE = Path(__file__).resolve().parent
-_s = str(PACKAGE)
-if _s not in sys.path:
-    sys.path.insert(0, _s)
+
+
+def _isolate_plugin_modules(package: Path = PACKAGE) -> None:
+    """Pin ``sys.path`` and evict foreign ``lo_core`` / ``lo_exec`` modules (JOB-3)."""
+    root = str(package.resolve())
+    while root in sys.path:
+        sys.path.remove(root)
+    sys.path.insert(0, root)
+    # cost: once per plugin load/reload; ≤ a few gateway restarts/day.
+    stale = []
+    for name, mod in list(sys.modules.items()):
+        if name != "lo_core" and not name.startswith("lo_core."):
+            if name != "lo_exec" and not name.startswith("lo_exec."):
+                continue
+        file_attr = getattr(mod, "__file__", None)
+        if not file_attr:
+            stale.append(name)
+            continue
+        try:
+            resolved = Path(file_attr).resolve()
+            resolved.relative_to(package.resolve())
+        except (OSError, ValueError):
+            stale.append(name)
+    for name in stale:
+        del sys.modules[name]
+
+
+_isolate_plugin_modules()
 
 from lo_core.bypass import code_starts_executor, command_starts_executor  # noqa: E402
 from lo_core.config import merge_config  # noqa: E402
 from lo_core.envelope import verify_envelope  # noqa: E402
 from lo_core.gate import make_error_result, run_gate  # noqa: E402
+from lo_core import journal as journal_mod  # noqa: E402  (bound at load: no lazy lo_* imports, KE-2026-11-20-STALE-TOPLEVEL-MODULES)
 from lo_exec import accept as accept_mod  # noqa: E402
 from lo_exec import dispatch as dispatch_mod  # noqa: E402
 from lo_exec import ledger as ledger_mod  # noqa: E402
@@ -407,30 +443,55 @@ def _start_completion_waiter(
     """Block on supervisor Popen.wait inside the captured call context (no polling)."""
 
     def _wait_and_notify() -> None:
+        supervisor_rc = None
         try:
-            supervisor.wait()
+            supervisor_rc = supervisor.wait()
         except Exception:  # noqa: BLE001
-            pass
-        exit_info = ledger_mod.read_exit_json(run_dir) or {}
-        ended = {
-            "event": "ended",
-            "id": dispatch_id,
-            "executor": executor_name,
-            "workdir": workdir,
-            "brief_sha256": brief_sha,
-            "task_sha256": task_sha,
-            "pid": pid,
-            "pgid": pgid,
-            "started": started,
-            "timeout": timeout,
-            "run_dir": run_dir,
-            "rc": exit_info.get("rc"),
-            "seconds": exit_info.get("seconds"),
-            "timed_out": exit_info.get("timed_out"),
-            "receipt_present": exit_info.get("receipt_present"),
-            "ended": exit_info.get("ended"),
-            "evidence": "exit_json" if exit_info else "supervisor_exited",
-        }
+            supervisor_rc = getattr(supervisor, "returncode", None)
+        exit_info = ledger_mod.read_exit_json(run_dir)
+        if exit_info:
+            ended = {
+                "event": "ended",
+                "id": dispatch_id,
+                "executor": executor_name,
+                "workdir": workdir,
+                "brief_sha256": brief_sha,
+                "task_sha256": task_sha,
+                "pid": pid,
+                "pgid": pgid,
+                "started": started,
+                "timeout": timeout,
+                "run_dir": run_dir,
+                "rc": exit_info.get("rc"),
+                "seconds": exit_info.get("seconds"),
+                "timed_out": exit_info.get("timed_out"),
+                "receipt_present": exit_info.get("receipt_present"),
+                "ended": exit_info.get("ended"),
+                "evidence": "exit_json",
+            }
+        else:
+            # API-7: supervisor died without exit.json — surface rc + log tail.
+            ended = {
+                "event": "ended",
+                "id": dispatch_id,
+                "executor": executor_name,
+                "workdir": workdir,
+                "brief_sha256": brief_sha,
+                "task_sha256": task_sha,
+                "pid": pid,
+                "pgid": pgid,
+                "started": started,
+                "timeout": timeout,
+                "run_dir": run_dir,
+                "rc": None,
+                "seconds": None,
+                "timed_out": False,
+                "receipt_present": os.path.isfile(os.path.join(run_dir, "RECEIPT.md")),
+                "ended": "",
+                "evidence": "supervisor_exited",
+                "supervisor_rc": supervisor_rc,
+                "supervisor_log_tail": dispatch_mod.supervisor_log_tail(run_dir),
+            }
         # Avoid double-append if reconcile already recorded this id.
         led = ledger_mod.ledger_path(data_dir)
         already = any(
@@ -687,8 +748,6 @@ def _journal_injection_miss(ctx: Any, dispatch_id: str, text: str) -> None:
     if not path:
         return
     try:
-        from lo_core import journal as journal_mod
-
         journal_mod.append_journal(
             path,
             {
@@ -729,8 +788,6 @@ def _journal_pending_delivered(ctx: Any, dispatch_id: str, text: str) -> None:
     if not path:
         return
     try:
-        from lo_core import journal as journal_mod
-
         journal_mod.append_journal(
             path,
             {

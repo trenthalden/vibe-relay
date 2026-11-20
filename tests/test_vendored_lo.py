@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -82,7 +83,11 @@ class VendoredLoSuite(unittest.TestCase):
         if run.returncode != 0:
             self.fail(combined)
         self.assertIn("OK", combined)
-        self.assertRegex(combined, r"Ran 74 tests")
+        # The vendored suite grows with each refresh; pin "ran and passed", not a count.
+        ran = re.search(r"Ran (\d+) tests", combined)
+        self.assertIsNotNone(ran, combined[-2000:])
+        self.assertGreater(int(ran.group(1)), 0)
+        self.assertNotIn("skipped=", combined)
 
 
 if __name__ == "__main__":
