@@ -2,7 +2,7 @@
 
 These are incident-derived lessons, not proof that every source-project implementation
 is universally correct. The installer copies this canonical file to
-`.devframework/LESSONS.md`; projects do not need access to the source project to read it.
+`.devframework/LESSONS.md`; projects do not need access to Main OS to read it.
 Rules live in the project-root AGENTS.md; recipe links are in .devframework/patterns/README.md.
 
 A rule without its reason gets deleted by the next person who finds it inconvenient — and
@@ -10,7 +10,7 @@ they are not being careless, they genuinely cannot see what it is holding up. Ke
 numbers. "Polling was expensive" persuades nobody; "17,000 requests a day from one phone
 for 63 days" ends the discussion.
 
-Source project: the source project (private; .NET 8 desktop, ASP.NET Core server, MAUI Android),
+Source project: Main OS (private; .NET 8 desktop, ASP.NET Core server, MAUI Android),
 roughly five months of work through 2026-08.
 
 ---
@@ -202,9 +202,9 @@ See `AGENTS.md` section 4.
 
 ## 12. Clearing an outbox lost newly queued records
 
-the source project took a queue snapshot, sent it, and on success saved an empty queue. A user record
+Main OS took a queue snapshot, sent it, and on success saved an empty queue. A user record
 added during the request disappeared. Two copies of the rule had independently diverged.
-Source evidence: the source project docs/ARCHITECTURE.md, "Правило очередей отправки на телефоне",
+Source evidence: Main OS docs/ARCHITECTURE.md, "Правило очередей отправки на телефоне",
 and KE-2026-08-27-OUTBOX in docs/KNOWN_ERRORS.md (recorded 2026-08-27).
 
 **Transferable rule:** remove only confirmed IDs from current durable pending work, in an
@@ -271,7 +271,7 @@ hooks. Those implementations were not ported in the initial scope. Version 0.2 a
 small stack-independent doctor, staged-secret heuristic and configurable finish runner,
 with their own negative tests. It does not claim parity with source-specific checks.
 
-The following paths and historical sizes identify reference material inside the source project,
+The following paths and historical sizes identify reference material inside Main OS,
 not files promised in this package. Re-evaluate applicability and test known defects
 before reusing them; past debugging is not a universal correctness guarantee.
 

@@ -12,10 +12,19 @@ _PLUGIN_CTX = None  # set in register(); used by auto-park to dispatch cronjob_m
 # Hyphenated plugin dir is not a normal import package name; put the plugin root
 # (and vendored DF) on sys.path so sibling modules resolve under Hermes load,
 # the validate capability probe, and unittest discovery alike.
+# Do NOT put vendor/lean_orchestration on sys.path here — import it only after
+# deciding to register (SEC-2 / no lo_core clash with a standalone copy).
 for _p in (PACKAGE, PACKAGE / "vendor"):
     _s = str(_p)
     if _s not in sys.path:
         sys.path.insert(0, _s)
+
+# Nested settings block for the vendored lean-orchestration copy (CFG-1).
+# Hermes ``ctx.get_config`` walks dotted segments under this plugin's settings, so
+# ``plugins.entries.vibe-relay.settings.lean_orchestration.<key>`` is readable as
+# ``ctx.get_config("lean_orchestration.<key>")`` on vibe-relay's PluginContext.
+_LO_SETTINGS_PREFIX = "lean_orchestration"
+_LO_STANDALONE_IDS = ("lean-orchestration", "lean_orchestration")
 
 
 def _on_pre_llm_call(session_id="", **kwargs):
@@ -229,6 +238,109 @@ def _reload_sibling_modules() -> None:
             logger.debug("vibe-relay: reload %s failed: %s", name, exc)
 
 
+def _standalone_lean_orchestration_present(ctx) -> bool:
+    """True when Hermes already loaded a standalone lean-orchestration plugin."""
+    has = getattr(ctx, "has_plugin", None)
+    if not callable(has):
+        return False
+    for plugin_id in _LO_STANDALONE_IDS:
+        try:
+            if has(plugin_id):
+                return True
+        except Exception as exc:
+            logger.debug("vibe-relay: has_plugin(%s) failed: %s", plugin_id, exc)
+    return False
+
+
+class _LoSettingsProxy:
+    """PluginContext proxy: LO flat keys read from ``settings.lean_orchestration.*`` (CFG-1).
+
+    Vendored lean-orchestration calls ``ctx.get_config("gate_enabled")`` etc. When that
+    copy is active inside vibe-relay, the host plugin id is ``vibe-relay``, so the
+    documented nested path is ``lean_orchestration.<key>`` under vibe-relay settings.
+    """
+
+    __slots__ = ("_ctx",)
+
+    def __init__(self, ctx):
+        object.__setattr__(self, "_ctx", ctx)
+
+    def get_config(self, key, default=None):
+        ctx = object.__getattribute__(self, "_ctx")
+        dotted = "%s.%s" % (_LO_SETTINGS_PREFIX, key)
+        try:
+            value = ctx.get_config(dotted, default=None)
+        except Exception:
+            value = None
+        if value is not None:
+            return value
+        # Whole-block form: settings.lean_orchestration = {gate_enabled: ...}
+        try:
+            block = ctx.get_config(_LO_SETTINGS_PREFIX, default=None)
+        except Exception:
+            block = None
+        if isinstance(block, dict) and key in block:
+            return block[key]
+        return default
+
+    def __getattr__(self, name):
+        return getattr(object.__getattribute__(self, "_ctx"), name)
+
+
+def _load_vendored_lean_orchestration():
+    """Import vendor/lean_orchestration only when registering (no early lo_core clash)."""
+    import importlib.util
+
+    lo_root = PACKAGE / "vendor" / "lean_orchestration"
+    init_path = lo_root / "__init__.py"
+    if not init_path.is_file():
+        raise FileNotFoundError("vendored lean-orchestration missing: %s" % init_path)
+    # cost: one import per register() when standalone LO is absent.
+    lo_path = str(lo_root)
+    if lo_path not in sys.path:
+        sys.path.insert(0, lo_path)
+    mod_name = "lean_orchestration_vendored"
+    existing = sys.modules.get(mod_name)
+    if existing is not None:
+        return existing
+    spec = importlib.util.spec_from_file_location(mod_name, init_path)
+    if spec is None or spec.loader is None:
+        raise ImportError("cannot load vendored lean-orchestration from %s" % init_path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _register_vendored_lean_orchestration(ctx) -> bool:
+    """Register vendored LO tools/hooks/command/skill when no standalone copy is loaded.
+
+    SEC-2: never two pre_tool_call guards from two copies. Hermes load order without
+    requires_plugins edges is alphabetical by registry key, so ``lean-orchestration``
+    loads before ``vibe-relay`` when both are enabled — ``has_plugin`` is then True and
+    this path is skipped. See NEEDS RECORDING for the reverse-order case.
+    """
+    if _standalone_lean_orchestration_present(ctx):
+        logger.info(
+            "vibe-relay: standalone lean-orchestration present — skipping vendored "
+            "orch_* tools, /orch, lean-orchestration skill, and LO hooks (SEC-2)"
+        )
+        return False
+    try:
+        lo = _load_vendored_lean_orchestration()
+        if hasattr(lo, "_reset_runtime_state"):
+            lo._reset_runtime_state()
+        lo.register(_LoSettingsProxy(ctx))
+        logger.info(
+            "vibe-relay: vendored lean-orchestration registered "
+            "(settings under plugins.entries.vibe-relay.settings.lean_orchestration.*)"
+        )
+        return True
+    except Exception as exc:
+        logger.warning("vibe-relay: vendored lean-orchestration register failed: %s", exc)
+        return False
+
+
 def register(ctx) -> None:
     global _PLUGIN_CTX
     _PLUGIN_CTX = ctx
@@ -303,6 +415,9 @@ def register(ctx) -> None:
             )
     except Exception as exc:
         logger.warning("vibe-relay: vendored DF register failed: %s", exc)
+
+    # Scheme B: vendored lean-orchestration gate (only when standalone is absent).
+    _register_vendored_lean_orchestration(ctx)
 
     _register_workshop_skills(ctx)
 

@@ -34,7 +34,7 @@
 ## KE-2026-08-31-KNOWLEDGE — lessons absent from installed projects
 
 - Introduced: c48cf74; detected: 2026-08-31 review.
-- Impact: provider/project switch loses rationale; the the source project outbox incident was omitted.
+- Impact: provider/project switch loses rationale; the Main OS outbox incident was omitted.
 - Status: fixed in v0.2.0 working tree, not yet committed/accepted.
 - Verification: installed lesson bytes equal the canonical source; outbox and all five
   local recipe links are tested in generated projects.

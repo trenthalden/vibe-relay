@@ -41,6 +41,7 @@ def _git_init(path: Path) -> Path:
 
 def _usage_snap(
     *,
+    now: datetime,
     session_used: float = 20.0,
     weekly_used: float = 30.0,
     hours_to_session_reset: float = 2.0,
@@ -48,16 +49,36 @@ def _usage_snap(
     include_weekly: bool = True,
     session_reset_at: datetime | None = None,
 ):
-    reset = session_reset_at or (
-        datetime.now(timezone.utc) + timedelta(hours=hours_to_session_reset)
-    )
+    # VER-1: reset_at is relative to the injected fixture clock, never wall-clock now.
+    clock = now.astimezone(timezone.utc)
+    reset = session_reset_at or (clock + timedelta(hours=hours_to_session_reset))
     windows = [FakeWindow(label="Session", used_percent=session_used, reset_at=reset)]
     if include_weekly:
-        week_reset = datetime.now(timezone.utc) + timedelta(days=3)
+        week_reset = clock + timedelta(days=3)
         windows.append(
             FakeWindow(label="Weekly", used_percent=weekly_used, reset_at=week_reset)
         )
     return FakeSnapshot(provider=provider, windows=tuple(windows))
+
+
+def _load_plugin():
+    """Load vibe-relay by file path (VER-2: avoid ``import __init__`` under discover -s tests)."""
+    import importlib.util
+    import sys
+
+    root = Path(__file__).resolve().parents[1]
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    mod_name = "vibe_relay_plugin_night"
+    existing = sys.modules.get(mod_name)
+    if existing is not None and hasattr(existing, "register"):
+        return existing
+    spec = importlib.util.spec_from_file_location(mod_name, root / "__init__.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[mod_name] = mod
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def _cron_dispatch(jobs: dict, calls: list):
@@ -111,7 +132,8 @@ class NightShiftTests(IsolatedHomeTest):
 
     def test_registered_subagent_stop_hook_does_not_persist_child_summary(self):
         from state import load_state
-        import __init__ as plugin
+
+        plugin = _load_plugin()
 
         class Context:
             def __init__(self):
@@ -308,7 +330,7 @@ class NightShiftTests(IsolatedHomeTest):
         self.assertIn("not stopped", blocked.get("message", ""))
 
         # Reserve block while window still open
-        snap = _usage_snap(session_used=95.0, weekly_used=40.0)
+        snap = _usage_snap(now=self.clock, session_used=95.0, weekly_used=40.0)
         get_quota(provider="anthropic", fetch=lambda _p: snap, force=True)
         mid = self.clock + timedelta(hours=1)
         reserved = pre_tool_call_directive(
@@ -340,7 +362,7 @@ class NightShiftTests(IsolatedHomeTest):
         from state import load_state
 
         self._start()
-        snap = _usage_snap(session_used=20.0, weekly_used=30.0, hours_to_session_reset=3.0)
+        snap = _usage_snap(now=self.clock, session_used=20.0, weekly_used=30.0, hours_to_session_reset=3.0)
         get_quota(provider="anthropic", fetch=lambda _p: snap, force=True)
 
         # Cron refusal
@@ -370,7 +392,7 @@ class NightShiftTests(IsolatedHomeTest):
         self.assertIn("unknown", str(ctx2.exception).lower())
 
         # Weekly ≤ reserve
-        low = _usage_snap(weekly_used=95.0)
+        low = _usage_snap(now=self.clock, weekly_used=95.0)
         with self.assertRaises(ValueError) as ctx3:
             arm_night(
                 dispatch=lambda t, a: "{}",
@@ -558,7 +580,7 @@ class NightShiftTests(IsolatedHomeTest):
 
         result = report_night(
             now=self.clock + timedelta(hours=1),
-            fetch_usage=lambda _p: _usage_snap(),
+            fetch_usage=lambda _p: _usage_snap(now=self.clock),
             dispatch=dispatch,
         )
         body = Path(result["path"]).read_text(encoding="utf-8")
@@ -590,7 +612,7 @@ class NightShiftTests(IsolatedHomeTest):
         ):
             unavailable_result = report_night(
                 now=self.clock + timedelta(hours=1),
-                fetch_usage=lambda _p: _usage_snap(),
+                fetch_usage=lambda _p: _usage_snap(now=self.clock),
                 dispatch=unavailable_dispatch,
             )
             unavailable_body = Path(unavailable_result["path"]).read_text(encoding="utf-8")
@@ -631,7 +653,7 @@ class NightShiftTests(IsolatedHomeTest):
             now=self.clock,
         )
         update_state(last_gate={"passed": True, "tree_hash": "abc123", "command": "pytest"})
-        snap = _usage_snap()
+        snap = _usage_snap(now=self.clock)
         result = report_night(
             now=self.clock + timedelta(hours=1),
             fetch_usage=lambda _p: snap,
@@ -656,7 +678,7 @@ class NightShiftTests(IsolatedHomeTest):
         from quota import get_quota
 
         self._start()
-        snap = _usage_snap(hours_to_session_reset=3.0)
+        snap = _usage_snap(now=self.clock, hours_to_session_reset=3.0)
         get_quota(provider="anthropic", fetch=lambda _p: snap, force=True)
         jobs = {}
         calls = []
@@ -688,6 +710,7 @@ class NightShiftTests(IsolatedHomeTest):
 
         self._start()
         session_only = _usage_snap(
+            now=self.clock,
             session_used=20.0,
             hours_to_session_reset=3.0,
             include_weekly=False,
@@ -715,6 +738,7 @@ class NightShiftTests(IsolatedHomeTest):
         self._start(replace=True)
         reset_at = self.clock.astimezone(timezone.utc) + timedelta(hours=8, minutes=30)
         low_session = _usage_snap(
+            now=self.clock,
             session_used=95.0,
             weekly_used=30.0,
             session_reset_at=reset_at,
@@ -747,6 +771,7 @@ class NightShiftTests(IsolatedHomeTest):
         # started 22:00; checkpoint default +90m = 23:30; put session reset ~23:27 (+ buffer 3 → 23:30)
         near_reset = (self.clock + timedelta(minutes=87)).astimezone(timezone.utc)
         near_snap = _usage_snap(
+            now=self.clock,
             session_used=20.0,
             weekly_used=30.0,
             session_reset_at=near_reset,
@@ -775,7 +800,7 @@ class NightShiftTests(IsolatedHomeTest):
         self._start(replace=True)
         calls.clear()
         jobs.clear()
-        past_snap = _usage_snap(hours_to_session_reset=5.0)
+        past_snap = _usage_snap(now=self.clock, hours_to_session_reset=5.0)
         out4 = arm_night(
             checkpoint_after_minutes=0,
             dispatch=dispatch,
@@ -805,6 +830,7 @@ class NightShiftTests(IsolatedHomeTest):
         )
         # dispatch_stop 07:30; checkpoint +90m from 06:00 = 07:30 → at dispatch_stop
         late_snap = _usage_snap(
+            now=late,
             hours_to_session_reset=0.5,
             session_reset_at=(late + timedelta(minutes=20)).astimezone(timezone.utc),
         )
@@ -858,6 +884,51 @@ class NightShiftTests(IsolatedHomeTest):
         self.assertIn("vibe_night_report", report)
         self.assertNotIn("parent active — exiting", report)
         self.assertIn("parent active — exiting", checkpoint)
+
+    def test_arm_quota_reset_stable_across_injected_dates(self):
+        """VER-1: arm creates checkpoint+quota_reset+report for today and +1 year clocks."""
+        from night import arm_night, start_night
+        from quota import get_quota
+        from state import update_state
+
+        for clock in (
+            datetime(2026, 11, 14, 22, 0, 0).astimezone(),
+            datetime(2027, 11, 14, 22, 0, 0).astimezone(),
+        ):
+            with self.subTest(clock=clock.isoformat()):
+                update_state(night=None)
+                start_night(
+                    hard_stop="08:00",
+                    stop_margin_minutes=30,
+                    reserve_percent=10,
+                    title=f"date-{clock.year}",
+                    quota_provider="anthropic",
+                    now=clock,
+                    cwd_resolver=self.cwd,
+                    provider_reader=self.provider,
+                    replace=True,
+                )
+                snap = _usage_snap(
+                    now=clock,
+                    session_used=20.0,
+                    weekly_used=30.0,
+                    hours_to_session_reset=3.0,
+                )
+                get_quota(provider="anthropic", fetch=lambda _p, s=snap: s, force=True)
+                calls = []
+                jobs = {}
+                out = arm_night(
+                    dispatch=_cron_dispatch(jobs, calls),
+                    fetch_usage=lambda _p, s=snap: s,
+                    provider_reader=self.provider,
+                    now=clock,
+                )
+                self.assertTrue(out.get("ok"), out)
+                self.assertEqual(len(calls), 3, calls)
+                names = [str(c.get("name", "")) for c in calls]
+                self.assertTrue(any("checkpoint" in n for n in names), names)
+                self.assertTrue(any("quota_reset" in n for n in names), names)
+                self.assertTrue(any("report" in n for n in names), names)
 
 
 if __name__ == "__main__":

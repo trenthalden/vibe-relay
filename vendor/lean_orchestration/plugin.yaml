@@ -1,0 +1,11 @@
+name: lean-orchestration
+version: "0.1.0"
+description: Deterministic orchestration gate — refuse incomplete briefs and deliver project rules by code.
+requires_hermes: ">=0.22.5"
+provides_tools:
+  - orch_gate
+  - orch_dispatch
+  - orch_accept
+provides_hooks:
+  - pre_tool_call
+  - on_session_start

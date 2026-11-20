@@ -35,7 +35,7 @@ class RoutingDecisionTests(IsolatedHomeTest):
 
 class ProviderRefuseTests(IsolatedHomeTest):
     def test_refuse_without_allowed_or_gate(self):
-        from agent.delegation_provider import DelegationRouteError
+        from hermes_compat import DelegationRouteError
         from provider import VibeRelayProvider
 
         p = VibeRelayProvider()

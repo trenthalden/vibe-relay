@@ -21,6 +21,7 @@ how the reason for a non-obvious defence survives the next refactor.
 **Status:** not fixed / fixed in <commit or version>
 **Workaround:** what to do until it is fixed, or "none".
 **Verification:** regression test, observed result and coverage limitations
+**Rules:** <AREA>-<n>, … (e.g. the ids from ARCHITECTURE_HEALTHCHECK.md) — the orchestration gate delivers the entry to tasks that touch those areas.
 ```
 
 Rules:

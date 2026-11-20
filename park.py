@@ -61,25 +61,18 @@ def in_cron_session() -> bool:
     the same marker / ``cron.allow_agent_scheduling`` gate. Fall back to
     process env for tests and hosts that only export the variable.
     """
-    try:
-        from gateway.session_context import get_session_env
+    from hermes_compat import get_session_env
 
-        if _truthy(get_session_env("HERMES_CRON_SESSION", "")):
-            return True
-    except Exception:
-        pass
+    if _truthy(get_session_env("HERMES_CRON_SESSION", "")):
+        return True
     return _truthy(os.environ.get("HERMES_CRON_SESSION", ""))
 
 
 def agent_scheduling_allowed() -> bool:
     """``cron.allow_agent_scheduling`` from Hermes config (default false)."""
-    try:
-        from hermes_cli.config import load_config_readonly
+    from hermes_compat import agent_scheduling_allowed as _allowed
 
-        cron = (load_config_readonly() or {}).get("cron") or {}
-        return bool(cron.get("allow_agent_scheduling"))
-    except Exception:
-        return False
+    return _allowed()
 
 
 def cron_scheduling_blocked() -> bool:
@@ -271,11 +264,9 @@ def _extract_job_id(text: str) -> Optional[str]:
 
 
 def _delegation_config() -> dict:
-    try:
-        from hermes_cli.config import load_config_readonly
-        return (load_config_readonly() or {}).get("delegation") or {}
-    except Exception:
-        return {}
+    from hermes_compat import delegation_config
+
+    return delegation_config()
 
 
 def status_text() -> str:

@@ -11,7 +11,8 @@ _LOCK = threading.RLock()
 
 
 def data_dir() -> Path:
-    from plugins.plugin_storage import plugin_data_dir
+    from hermes_compat import plugin_data_dir
+
     return plugin_data_dir(PLUGIN_ID)
 
 

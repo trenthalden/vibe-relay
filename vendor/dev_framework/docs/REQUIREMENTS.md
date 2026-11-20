@@ -10,7 +10,7 @@
 | FR-006 | Reliability recipes include failure tests and data-flow monitoring criteria. | delivered recipes; consumer implementation required |
 | FR-007 | Finish requires a `TESTS` line with more than zero executed tests and zero failures. The snapshot digest and index/worktree parity check were removed on 2026-09-23. `commit-check` adds a staged secret scan. | matches the simplified gate; see KE-2026-08-31-FINISH-EVIDENCE |
 | FR-008 | Secret checks cover common dotenv/YAML/C# literals without blocking harmless OAuth metadata; no secret values in diagnostics. | verified heuristic, documented limits |
-| FR-009 | Reviewed the source project lessons have an auditable transfer map, applicability, regression criteria and explicit exclusions. | 24 rows / eight recipes verified; not an exhaustive history audit |
+| FR-009 | Reviewed Main OS lessons have an auditable transfer map, applicability, regression criteria and explicit exclusions. | 24 rows / eight recipes verified; not an exhaustive history audit |
 | FR-010 | A disposable live fresh-session handoff validates recovery of decisions, evidence, next work and authority without prior chat. | fixture verified; native pilot BLOCKED, docs/evidence/HANDOFF_2026-08-31.md |
 | FR-011 | A project receives a use-case catalogue, copy templates, composition rules and doctor checks for stable UC/SET IDs, Test fields and traceability. | implemented locally; consumer fill-in still required |
 | FR-012 | Work that will not fit in one iteration has a living checklist; every operator reply ends with that list, completed items struck through, until it is empty. | implemented in protocol |
@@ -22,4 +22,4 @@
 | NFR-003 | No installation, check or finish implicitly commits, pushes, deploys or restarts an app. | verified; configured commands must be reviewed |
 
 The original documentation-only scope is preserved in docs/archive/PLAN.md. Version 0.2
-adds the minimal automation explicitly approved after review; it does not port the source project.
+adds the minimal automation explicitly approved after review; it does not port Main OS.

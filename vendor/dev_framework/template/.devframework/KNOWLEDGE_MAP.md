@@ -1,7 +1,7 @@
-# Transfer map — the source project to new projects
+# Transfer map — Main OS to new projects
 
 Reviewed: 2026-08-31. This is the coverage ledger, not another rulebook. Canonical rules
-and recipes are linked and installed locally; the source project is not needed to use them.
+and recipes are linked and installed locally; Main OS is not needed to use them.
 Transferred means a design/failure-test contract, not consumer implementation or proof
 the source implementation was universally correct.
 
@@ -58,11 +58,11 @@ implementation, not runtime coverage claims from Markdown.
 - Exact WPF panels/aliases, SQLite pragma constants, Android commands, personal paths and
   account identifiers are not universal defaults. Transfer the invariant and require an
   applicable stack profile with its own measured/verified implementation.
-- Model-attribution collectors, the source project feature catalog and language-specific gate source
+- Model-attribution collectors, Main OS feature catalog and language-specific gate source
   are not ported. Transcript adapters cannot reliably infer unknown authorship.
 - Private logs, credentials, user records and provider-private memory are not copied.
 - Other documents, unnamed known-error entries and the full historical Git corpus have
-  NOT been exhaustively audited. Do not describe this as "all the source project proven covered".
+  NOT been exhaustively audited. Do not describe this as "all Main OS proven covered".
   Discoveries first receive a source selection/K-NNN row, then a recipe and negative test.
 - The source refactor plan has historical phase/status claims. Transfer its contract, not
   a claim that a server deploy/live smoke actually passed.

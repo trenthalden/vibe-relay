@@ -148,25 +148,33 @@ class StopQuotaFreshnessTests(IsolatedHomeTest):
         self.assertEqual(len(calls), 2)
 
     def test_no_private_account_usage_cache_import(self):
-        """R7: quota.py must not import the private cache helper."""
+        """R7: quota goes through hermes_compat; no private cache helper anywhere."""
         import ast
         from pathlib import Path
 
+        import hermes_compat
         import quota as quota_mod
 
-        tree = ast.parse(Path(quota_mod.__file__).read_text(encoding="utf-8"))
-        imported = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                imported.extend(a.name for a in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                mod = node.module or ""
-                imported.append(mod)
-                imported.extend(f"{mod}.{a.name}" for a in node.names)
-        joined = " ".join(imported)
-        self.assertNotIn("account_usage_cache", joined)
-        self.assertNotIn("cached_account_usage", joined)
-        self.assertIn("agent.account_usage", joined)
+        def _imports(path: Path) -> str:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            imported = []
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported.extend(a.name for a in node.names)
+                elif isinstance(node, ast.ImportFrom):
+                    mod = node.module or ""
+                    imported.append(mod)
+                    imported.extend(f"{mod}.{a.name}" for a in node.names)
+            return " ".join(imported)
+
+        quota_joined = _imports(Path(quota_mod.__file__))
+        compat_joined = _imports(Path(hermes_compat.__file__))
+        self.assertNotIn("account_usage_cache", quota_joined)
+        self.assertNotIn("cached_account_usage", quota_joined)
+        self.assertNotIn("account_usage_cache", compat_joined)
+        self.assertNotIn("cached_account_usage", compat_joined)
+        self.assertIn("hermes_compat", quota_joined)
+        self.assertIn("agent.account_usage", compat_joined)
 
 
     def test_executor_lane_still_fires_when_quota_empty_but_stop_needs_used(self):

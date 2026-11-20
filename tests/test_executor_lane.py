@@ -199,10 +199,12 @@ class ExecutorLaneEnforceTests(IsolatedHomeTest):
 
     def test_readonly_config_load_is_used_for_delegation(self):
         from executor_lane import load_delegation_config
-        from hermes_cli import config
+        import hermes_compat
 
         expected = {"backend": "vibe-relay", "backends": {"vibe-relay": {"policy": "auto"}}}
-        with mock.patch.object(config, "load_config_readonly", return_value={"delegation": expected}):
+        with mock.patch.object(
+            hermes_compat, "load_config_readonly", return_value={"delegation": expected}
+        ):
             self.assertEqual(load_delegation_config(), expected)
 
 

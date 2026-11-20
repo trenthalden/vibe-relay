@@ -10,7 +10,7 @@ Vibecoding without burning your best model: a Hermes delegation backend that rou
 
 ## Built on DEV Framework
 
-The gate, project rules and `df_init` / `df_check` / `df_nav` come from **[DEV Framework](https://github.com/trenthalden/dev-framework)**, vendored here under `vendor/dev_framework/` (version in `vendor/dev_framework/VERSION`). vibe-relay adds quota routing, the executor lane, acceptance and park/resume on top of it.
+The gate, project rules and `df_init` / `df_check` / `df_nav` come from **[DEV Framework](https://github.com/trenthalden/dev-framework)**, vendored here under `vendor/dev_framework/` (version in `vendor/dev_framework/VERSION`, pin in `vendor/dev_framework.SOURCE.json`). vibe-relay adds quota routing, the executor lane, acceptance and park/resume on top of it.
 
 Want only the framework, or want it in another coding agent? Use the parent repository:
 
@@ -22,6 +22,27 @@ Want only the framework, or want it in another coding agent? Use the parent repo
 | Any agent with a shell | clone it and run `python scripts/install.py` |
 
 Both enabled in one Hermes profile? See [collision](#collision-with-a-standalone-dev-framework-plugin).
+
+## Scheme B — gate included
+
+Scheme B vendors the **lean-orchestration** deterministic door (`orch_gate` / `orch_dispatch` / `orch_accept`, `/orch`, skill, and its `pre_tool_call` / `on_session_start` hooks) under `vendor/lean_orchestration/` (pin: `vendor/lean_orchestration.SOURCE.json`). A vibe-relay user gets the brief gate without installing another plugin.
+
+**One active copy (SEC-2):** if Hermes already loaded a standalone `lean-orchestration` plugin (`ctx.has_plugin("lean-orchestration")`), vibe-relay does **not** import or register the vendored copy — no duplicate tools, hooks, `/orch`, or skill. Disable the standalone plugin to use the vendored gate.
+
+**Settings (CFG-1):** when the vendored copy is active, configure it under vibe-relay's nested settings (Hermes walks dotted keys on this plugin's context):
+
+```yaml
+plugins:
+  entries:
+    vibe-relay:
+      settings:
+        lean_orchestration:
+          gate_enabled: true
+          delegate_guard: envelope
+          # …same keys as standalone lean-orchestration
+```
+
+Refresh pins after re-copying sources: `python3 scripts/vendor_refresh.py` (re-applies the documented DF local patches under `scripts/df_local_patches/`).
 
 ## 30-second quickstart
 
@@ -56,12 +77,14 @@ See [docs/DEMO.md](docs/DEMO.md) for a &lt;90 s shot list.
 | Delegation backend | `vibe-relay` | `lane` auto\|self\|executor; requires `allowed` + `gate` |
 | Tool | `vibe_accept` | Changed paths ⊆ allowed + fresh gate PASS → ACCEPT/REJECT |
 | Tool | `df_init` / `df_check` / `df_nav` | Vendored DEV Framework (df_check returns a terminal command) |
+| Tool | `orch_gate` / `orch_dispatch` / `orch_accept` | Vendored lean-orchestration gate (Scheme B; skipped if standalone LO is enabled) |
+| Slash | `/orch` | lean-orchestration coverage (when vendored copy is active) |
 | Slash | `/vibe` | Quota, mode, last gate, pending park |
 | Slash | `/vibe park` | Handoff + one-shot cron at reset+buffer (clears prior pending_park) |
 | Blueprint | `resume-after-reset` | Manual catalog twin of the park resume job |
 | Tool | `vibe_night_start` / `vibe_night_log` / `vibe_night_status` / `vibe_night_arm` / `vibe_night_report` | Night shift: plan, records, liveness, wakes, morning report |
 | Slash | `/night start\|status\|arm\|report\|stop` | Owner controls for the night shift |
-| Hooks | `pre_llm_call`, `api_request_error`, `pre_tool_call`, `post_tool_call`, `pre_verify`, `subagent_start`, `subagent_stop` | Quota + stop context; enforce stop/park, executor lane and the night hard stop; capture gate; parent liveness stamp; track children |
+| Hooks | `pre_llm_call`, `api_request_error`, `pre_tool_call`, `post_tool_call`, `pre_verify`, `subagent_start`, `subagent_stop`, `on_session_start` | Quota + stop context; enforce stop/park, executor lane and the night hard stop; capture gate; parent liveness stamp; track children; vendored LO session reconcile when Scheme B is active |
 
 ## Configuration (`delegation.backends.vibe-relay`)
 
@@ -141,12 +164,16 @@ vibe_night_log …              # queue rows, decisions taken without the owner,
 **cost:** hooks add an in-memory check per tool call and at most one small state write per minute; quota reads reuse the
 180 s cache; up to three cron jobs per night by default (checkpoint, quota reset, report).
 
+## Hermes host adapter (`hermes_compat.py`)
+
+Every Hermes internal beyond the live `PluginContext` (`ctx.get_config`, `ctx.session_cwd`, `ctx.register_delegation_provider`, hooks/tools) is reached only through `hermes_compat.py`. That module wraps top-level config reads (`delegation` / `cron` / `model` — CFG-1: not plugin settings), session cwd, cron session env, `fetch_account_usage`, the delegation ABC, and `plugin_data_dir`. A missing host capability is named and logged once; it is never silently replaced by a default. Product modules and scripts must not `import` / `from` `hermes_cli`, `agent`, `gateway`, … directly — a unit test greps for that.
+
 ## Data & network disclosure / security
 
-- **Network:** only through Hermes public `agent.account_usage.fetch_account_usage(provider, read_only=True)` (usable snapshots cached ≤ 180 s under plugin storage; empty/failed fetches use a **15 s negative TTL** so a brief miss after `state.json` wipe does not lock out stop/routing for a full TTL). No private `account_usage_cache` import, no direct credential file reads, no xAI/grok-cli paths.
+- **Network:** only through `hermes_compat.fetch_account_usage` → Hermes public `agent.account_usage.fetch_account_usage(provider, read_only=True)` (usable snapshots cached ≤ 180 s under plugin storage; empty/failed fetches use a **15 s negative TTL** so a brief miss after `state.json` wipe does not lock out stop/routing for a full TTL). No private `account_usage_cache` import, no direct credential file reads, no xAI/grok-cli paths.
 - **Slug confinement:** vendored `df_nav` → `navigate.py` checklist/handoff (and vibe-relay park handoff) accept only `[A-Za-z0-9._-]+` slugs; reject `..`, empty, and leading-dot forms; the resolved path must stay under `root/docs` before any read, write, or unlink (blocks `../`, nested `a/b`, absolute paths, and symlinked docs/file escapes).
 - **Cron loop guard:** park/auto-park will not call `cronjob_manage` when `HERMES_CRON_SESSION` is set unless `cron.allow_agent_scheduling` is true (core’s loop-prevention gate); the stop block still applies and says no resume timer was set because this is a scheduled run.
-- **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `agent.runtime_cwd.resolve_agent_cwd()`); optional handoff write under the target repo’s `docs/` (slug-confined).
+- **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `hermes_compat.resolve_agent_cwd` / `ctx.session_cwd`); optional handoff write under the target repo’s `docs/` (slug-confined).
 - **Local child processes:**
   - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree), **`$HOME` itself**, **filesystem root (`/`)**, and protected `$HOME` dot-folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`).
   - `df_nav` runs the **plugin’s** vendored `template/.devframework/navigate.py` with `--root <target>` (cwd = that vendored folder, `python -I -B`). It does **not** execute the target repo’s `.devframework/navigate.py`.
@@ -159,6 +186,10 @@ vibe_night_log …              # queue rows, decisions taken without the owner,
 ## Collision with a standalone `dev-framework` plugin
 
 If `dev-framework` is already enabled, tool names `df_init` / `df_check` / `df_nav` may already be registered. vibe-relay detects that and **skips** re-registration (log line), keeping the already-loaded handlers. Disable the standalone plugin to use this repo’s vendored copy (`df_check` returns a terminal command instead of executing gates in-process).
+
+## Collision with a standalone `lean-orchestration` plugin
+
+Same rule as Scheme B above: if `lean-orchestration` is already enabled, vibe-relay skips every vendored LO registration (tools, hooks, `/orch`, skill). Hermes loads plugins in dependency order with alphabetical ties, so `lean-orchestration` normally loads before `vibe-relay` and `has_plugin` sees it.
 
 ## Agent Workshop skill pack
 

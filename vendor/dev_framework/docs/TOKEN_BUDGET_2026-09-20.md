@@ -75,7 +75,7 @@ tool descriptions (≤ 400 tokens each) and short command outputs (≤ 30 lines 
 21. Measure in **both** a fresh profile and a loaded one (e.g. the owner's engineering profile). The delta is the interference cost, a first-class KPI; `measure.py` reports foreign-skill bytes and lists which foreign skills were loaded.
 
 ## G. Coexistence with the host profile (found in the 2026-09-20 runs; sterile profiles are the exception)
-What actually happened in a loaded profile (`engineering-profile`: SOUL + ~60 skills + verify-on-stop):
+What actually happened in a loaded profile (`mastermind`: SOUL + ~60 skills + verify-on-stop):
 
 | mechanism | evidence | consequence | framework-side fix |
 |---|---|---|---|

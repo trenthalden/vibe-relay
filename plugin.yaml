@@ -1,11 +1,12 @@
 name: vibe-relay
-version: 0.4.0
+version: 0.5.0
 description: >
   Vibecoding without burning your best model: quota-aware self vs cheap executor
   delegation, gate-bound acceptance, enforced stop-at-threshold with auto
   park/resume across usage-window resets, a night shift for large projects
   (hard stop, quota-checked continuation wakes, morning report from records),
-  and an Agent Workshop skill pack for building and running long-lived agents.
+  an Agent Workshop skill pack, and Scheme B — vendored DEV Framework plus the
+  lean-orchestration deterministic gate (skipped when a standalone copy is enabled).
 author: trenthalden
 homepage: https://github.com/trenthalden/vibe-relay
 requires_hermes: ">=0.22.5"
@@ -19,6 +20,9 @@ provides_tools:
   - df_init
   - df_check
   - df_nav
+  - orch_gate
+  - orch_dispatch
+  - orch_accept
 provides_hooks:
   - pre_llm_call
   - api_request_error
@@ -27,3 +31,4 @@ provides_hooks:
   - pre_verify
   - subagent_start
   - subagent_stop
+  - on_session_start

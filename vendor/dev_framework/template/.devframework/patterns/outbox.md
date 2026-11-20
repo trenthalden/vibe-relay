@@ -3,7 +3,7 @@
 ## Problem and applicability
 
 Use when local records must reach another process/service without disappearing during
-network failure, concurrent creation or restart. Source: the source project KE-2026-08-27-OUTBOX.
+network failure, concurrent creation or restart. Source: Main OS KE-2026-08-27-OUTBOX.
 
 ## Invariant and protocol
 

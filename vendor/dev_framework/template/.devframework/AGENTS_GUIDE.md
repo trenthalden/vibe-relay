@@ -21,7 +21,7 @@ These are loading mechanisms, not guarantees that a model follows every instruct
 
 ## Fresh-session compatibility test (performed by the engineer)
 
-Use a disposable installed repository, not the source project or the framework source directory.
+Use a disposable installed repository, not Main OS or the framework source directory.
 Configure a tiny sample project and place an agreed decision and next step in its plan.
 Start a fresh session without the original chat in each available provider and ask:
 

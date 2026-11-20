@@ -1,6 +1,6 @@
 # Personal desktop profile
 
-Opt-in defaults derived from the source project, not requirements for every project.
+Opt-in defaults derived from Main OS, not requirements for every project.
 
 - Linear main development can be selected in PROJECT.md. Do not switch an existing
   branch merely because this profile mentions main.

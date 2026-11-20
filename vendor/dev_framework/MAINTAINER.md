@@ -8,7 +8,7 @@ The evaluation ratios below are recorded results, not a same-model proof. See [e
 
 # DEV Framework
 
-A provider-neutral engineering process package extracted from the source project. Version source:
+A provider-neutral engineering process package extracted from Main OS. Version source:
 [VERSION](VERSION). No application runtime/library is imposed. The package supplies rules,
 project documents, reliability recipes and small verification tools.
 
@@ -299,7 +299,7 @@ A past green run is not a promise about the next one.
 Local results and unverified environments are recorded in [the active plan](docs/PLAN.md).
 The reproducible handoff fixture and actual native-provider access results are documented
 in [pilot evidence](docs/evidence/HANDOFF_2026-08-31.md). A blocked session is not a pass.
-Source-specific the source project scanners, runtime monitoring, artifact parsers and model-attribution
+Source-specific Main OS scanners, runtime monitoring, artifact parsers and model-attribution
 collection are not included. No claim of exhaustive security scanning or universal crash safety.
 
 ## Maintenance

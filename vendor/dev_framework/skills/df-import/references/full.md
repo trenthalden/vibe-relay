@@ -46,7 +46,7 @@ against. **Ask the operator.** It is a product decision, not a technical default
 template's `10,000 users` is a placeholder for a project that no longer exists. Getting it
 wrong makes every cost calculation in the project wrong in the same direction.
 
-Ask for the figure they actually mean at the timeframe they care about — an internal tool
+Ask for the figure they actually mean at the horizon they care about — an internal tool
 for one company and a public service differ by three orders of magnitude, and the whole
 point of the rule is that the arithmetic is real.
 

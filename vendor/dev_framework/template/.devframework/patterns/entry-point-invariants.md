@@ -2,7 +2,7 @@
 
 ## Problem and applicability
 
-A correct guard does not protect a path which bypasses it. the source project's tray exit changed
+A correct guard does not protect a path which bypasses it. Main OS's tray exit changed
 from a cancellable close to unconditional shutdown; the password guard never changed.
 Use for authorization, protected shutdown, deletion, billing and other behaviour whose
 violation defeats the product, including non-UI entry points.

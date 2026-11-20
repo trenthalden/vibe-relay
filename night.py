@@ -160,18 +160,15 @@ def bound_text(value: Any, *, field: str) -> str:
 
 def hermes_home_root() -> Path:
     """Profile Hermes home = plugin_data_dir('vibe-relay').parent.parent (no hermes_constants)."""
-    from plugins.plugin_storage import plugin_data_dir
+    from hermes_compat import plugin_data_dir
 
     return plugin_data_dir("vibe-relay").resolve().parent.parent
 
 
 def default_cwd_resolver() -> str:
-    try:
-        from agent.runtime_cwd import resolve_agent_cwd
+    from hermes_compat import resolve_agent_cwd
 
-        return str(resolve_agent_cwd())
-    except Exception:
-        return str(Path.cwd())
+    return resolve_agent_cwd()
 
 
 def resolve_repo_root(cwd_resolver: Optional[CwdResolver] = None) -> Path:
@@ -394,12 +391,9 @@ def active_night_meta() -> Optional[dict]:
 
 
 def _delegation_config() -> dict:
-    try:
-        from hermes_cli.config import load_config_readonly
+    from hermes_compat import delegation_config
 
-        return (load_config_readonly() or {}).get("delegation") or {}
-    except Exception:
-        return {}
+    return delegation_config()
 
 
 def night_settings(delegation: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
@@ -424,15 +418,9 @@ def night_settings(delegation: Optional[Mapping[str, Any]] = None) -> Dict[str, 
 
 
 def default_provider_reader() -> Tuple[str, str]:
-    try:
-        from hermes_cli.config import load_config_readonly
+    from hermes_compat import model_provider_and_name
 
-        model = (load_config_readonly() or {}).get("model") or {}
-        provider = str(model.get("provider") or "").strip()
-        name = str(model.get("default") or model.get("model") or "").strip() or "<model>"
-        return provider, name
-    except Exception:
-        return "", "<model>"
+    return model_provider_and_name()
 
 
 # ─── quota helpers for night ──────────────────────────────────────────────────

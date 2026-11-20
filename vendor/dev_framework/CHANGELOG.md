@@ -5,6 +5,31 @@ changed defaults. Read this file before updating. Tags use `dev-framework--vX.Y.
 
 ## Unreleased
 
+## 1.7.0 — 2026-11-20
+
+- Machine-readable navigation for orchestration consumers: `navigate.py health --json`,
+  `health --paths … --json`, `known-errors --json` (algorithm `ke-lexical/1`) and
+  `ids --check … --json`. Envelope fields `schema` + `framework_version` (from the
+  installed `.devframework/manifest.json`). Text output without `--json` stays
+  byte-identical to 1.6.x (API-9 / KE-2026-08-31-UPGRADE).
+- Optional `areas` map in `.devframework/project.json` (glob → health areas) for
+  `health --paths`. JSON is written as UTF-8 bytes to `stdout.buffer`
+  (KE-2026-10-02-CONSOLE-ENCODING).
+- `known-errors --json --areas A[,B…]`: deliver known errors linked to health areas
+  (cited rule id or optional `**Rules:**` / `**Areas:**` line), document order, no ranking.
+- Fenced Markdown examples are ignored when detecting known-error headings, healthcheck
+  rows and `ids --check` sources (API-4); the template entry-format example no longer
+  cites real rule ids.
+- `ids --check` recognises FR/NFR definitions written as column-0 bold list items
+  (`- **FR-303:** …`) in `docs/REQUIREMENTS.md`, alongside headings and table rows.
+
+## 1.6.3 — 2026-11-10
+
+- Security: `navigate.py` confines checklist and handoff slugs. Only `[A-Za-z0-9._-]+`, no `..`,
+  no leading dot; the resolved path must stay under `docs/` (itself under the project root)
+  before any read, write or unlink, including `archive`. Before this, a `../` slug could create,
+  append to or delete a `.md` file outside the project. Reported in the Hermes plugin catalog review.
+
 ## 1.6.2 — 2026-11-05
 
 - Make architecture/testing simplicity review periodic, short and part of the existing

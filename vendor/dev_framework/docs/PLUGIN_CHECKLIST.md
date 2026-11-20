@@ -29,7 +29,7 @@ Open items below are not the current release gate.
 - [x] Tech / Message reply rule, parallel subagents and per-reply checklist copy present in AGENTS.md,
       .hermes.md and both skills (audited 2026-09-21)
 - [x] Commit v0.4.0 (ff0386d, 2026-09-21)
-- [x] Plugin evals S1–S3 in profile `engineering-profile` (2026-09-21, gpt-5.6-terra): calls 0.33–0.55×, input tokens
+- [x] Plugin evals S1–S3 in profile `mastermind` (2026-09-21, gpt-5.6-terra): calls 0.33–0.55×, input tokens
       0.30–0.47×, active seconds 0.47–0.75× of the skills baseline; quality equal or better (S3: 3/3 planted
       questions, no extras). Report `evals/runs/2026-09-21_plugin.md`
 - [x] Verified: no post-report ad-hoc scripts, no hub detour, foreign skills reported (`known-errors` 46k via SOUL)

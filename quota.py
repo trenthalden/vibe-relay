@@ -84,19 +84,18 @@ def earliest_reset_at(usage: Dict[str, Any]) -> Optional[str]:
 
 
 def active_provider_slug() -> Optional[str]:
-    try:
-        from hermes_cli.config import load_config_readonly
-        cfg = load_config_readonly() or {}
-        model = cfg.get("model") or {}
-        slug = str(model.get("provider") or "").strip()
-        return slug or None
-    except Exception:
-        return None
+    from hermes_compat import active_provider_slug as _slug
+
+    return _slug()
 
 
 def default_fetch(provider: Optional[str]) -> Any:
-    from agent.account_usage import fetch_account_usage
-    return fetch_account_usage(provider, read_only=True)
+    from hermes_compat import fetch_account_usage, is_missing
+
+    snap = fetch_account_usage(provider, read_only=True)
+    if is_missing(snap):
+        return None
+    return snap
 
 
 def _usable_usage(usage: Optional[Dict[str, Any]]) -> bool:
@@ -223,12 +222,9 @@ def context_block(usage: Optional[Dict[str, Any]] = None) -> str:
 
 
 def _delegation_for_context() -> dict:
-    try:
-        from hermes_cli.config import load_config_readonly
+    from hermes_compat import delegation_config
 
-        return (load_config_readonly() or {}).get("delegation") or {}
-    except Exception:
-        return {}
+    return delegation_config()
 
 
 def settings_from_delegation(config: Optional[dict] = None) -> Dict[str, Any]:

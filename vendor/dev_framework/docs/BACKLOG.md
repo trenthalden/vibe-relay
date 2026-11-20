@@ -32,7 +32,7 @@ for `9efa0d7` was green. The v0.2 notes below are the 31 August record. They are
 ## Earlier verification (not final acceptance)
 
 - v0.2 — approved review improvements. Scope, evidence and handoff: [PLAN.md](PLAN.md).
-  Out: application integrations, changes to the source project, deployment and cross-provider account
+  Out: application integrations, changes to Main OS, deployment and cross-provider account
   automation. Status: implementation verified, awaiting acceptance. Final local suite:
   63 tests passed; no commits/pushes. Hosted CI and live provider sessions not yet run.
 

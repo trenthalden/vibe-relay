@@ -3,11 +3,17 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from agent.delegation_provider import DelegationProvider, DelegationRouteError
+from hermes_compat import DelegationProvider, DelegationRouteError
 
 from quota import get_quota, settings_from_delegation
 from routing import decide_from_usage
 from state import update_state
+
+if DelegationProvider is None:  # pragma: no cover - host without delegation surface
+    raise RuntimeError(
+        "vibe-relay: Hermes capability delegation_provider missing — "
+        "cannot subclass DelegationProvider"
+    )
 
 
 class VibeRelayProvider(DelegationProvider):

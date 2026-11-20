@@ -1,6 +1,6 @@
 # PLAN — build the DEV Framework package
 
-One-time program of work: extract the reusable process layer from the source project into an
+One-time program of work: extract the reusable process layer from Main OS into an
 installable package, so the next project does not repeat the refactor that produced it.
 
 **Finished 2026-08-31 and archived.** Every portion is done; the package is published
@@ -12,7 +12,7 @@ decided and why, not as a living document.
 - Carry over: rules, document skeletons, knowledge base. English.
 - Do NOT carry over: the Python check pipelines (`periodic_cost.py`, `secrets.py`,
   `doc_drift.py`, `finish.py`, `attribution/build.py`). The *protocol* they enforce is
-  written down; the implementations stay in the source project as the reference to port from later.
+  written down; the implementations stay in Main OS as the reference to port from later.
 - Form: `template/` plus `install.ps1` that lays it into a target repository.
 - Home: local repo `D:\DEV\DEV-Framework`, mirrored to a **private** GitHub repository.
 

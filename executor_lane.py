@@ -90,12 +90,10 @@ def is_child_caller(*, session_id: str = "", task_id: str = "", **_kwargs: Any) 
 
 def load_delegation_config() -> Dict[str, Any]:
     """Best-effort read of ``delegation`` from the active Hermes config."""
-    try:
-        from hermes_cli.config import load_config_readonly
+    from hermes_compat import delegation_config
 
-        cfg = load_config_readonly() or {}
-        delegation = cfg.get("delegation")
-        return dict(delegation) if isinstance(delegation, dict) else {}
+    try:
+        return delegation_config()
     except Exception as exc:
         logger.debug("vibe-relay: read-only config load failed: %s", type(exc).__name__)
         return {}

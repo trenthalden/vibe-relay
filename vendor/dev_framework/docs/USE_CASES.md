@@ -95,7 +95,7 @@ guard). Composition rules for *consumer* catalogues are in
 
 ### Module: Consumer value catalogue
 
-**Value:** the next project records benefit paths the way the source project had to learn to.
+**Value:** the next project records benefit paths the way Main OS had to learn to.
 **Components:** `template/docs/USE_CASES.md`, `USE_CASE_TEMPLATE.md`,
 `USE_CASES_SLICE_TEMPLATE.md`, doctor catalogue checks.
 

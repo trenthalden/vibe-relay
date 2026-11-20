@@ -21,16 +21,13 @@ PASS_PATTERNS = (
 
 
 def resolve_session_cwd() -> str:
-    """Session/terminal cwd via public Hermes API — not the gateway process cwd.
+    """Session/terminal cwd via hermes_compat (ctx.session_cwd or resolve_agent_cwd).
 
-    Documented for plugins: ``agent.runtime_cwd.resolve_agent_cwd()`` (reads the
-    session pin / ``TERMINAL_CWD`` bridge). Falls back to ``Path.cwd()`` outside Hermes.
+    Not the gateway process cwd. Falls back to ``Path.cwd()`` outside Hermes.
     """
-    try:
-        from agent.runtime_cwd import resolve_agent_cwd
-        return str(resolve_agent_cwd())
-    except Exception:
-        return str(Path.cwd())
+    from hermes_compat import resolve_agent_cwd
+
+    return resolve_agent_cwd()
 
 
 def _cwd(cwd: Optional[str] = None) -> Path:

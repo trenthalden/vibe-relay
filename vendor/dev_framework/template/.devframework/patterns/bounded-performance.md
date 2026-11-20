@@ -3,7 +3,7 @@
 ## Problem and applicability
 
 A fast small dataset can hide work proportional to every record, image and layout element.
-the source project optimized inner timings while users still saw multi-second freezes. Apply to growing
+Main OS optimized inner timings while users still saw multi-second freezes. Apply to growing
 lists, queries, imports and batch jobs.
 
 ## Invariant and protocol

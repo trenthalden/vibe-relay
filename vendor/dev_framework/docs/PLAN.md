@@ -13,7 +13,7 @@ process package, not an application runtime. Keep documentation in English.
   numeric cost calculations; safe installation and upgrade with preview and backups;
   minimal stack-independent doctor, staged-secret check, configured finish and CI;
   positive and negative automated tests.
-- Out: changing the source project, application-specific build integrations, universal language
+- Out: changing Main OS, application-specific build integrations, universal language
   parsers, production monitoring services, agent-account configuration, deployments,
   commits and pushes before operator acceptance. No fabricated cross-provider smoke test.
 - Implementation choice: Python 3.10+ standard library for portable tooling, PowerShell
@@ -39,7 +39,7 @@ Acceptance: document checks and entry-point tests; no copied provider-specific f
 - [x] Limits, failure cases, tests and observable data-flow outcomes in each recipe.
 - [x] Correct reflection/generation overclaims; record missing outbox lesson.
 
-Acceptance: a generated project has local links to every recipe, without the source project access.
+Acceptance: a generated project has local links to every recipe, without Main OS access.
 
 ### 3. Tooling
 
@@ -89,7 +89,7 @@ and finish command failures. No real user data or external service writes.
   The workflow is configured for Windows/Linux and Python 3.10/3.13, not claimed executed.
 - Next: restore provider access without weakening policy, rerun the native pilot, then
   present complete evidence for acceptance. No automatic commit/push.
-  the source project was not modified; no production app was built, stopped or relaunched.
+  Main OS was not modified; no production app was built, stopped or relaunched.
 - External input: Claude reauthentication requested; a permitted native Codex read path
   is also needed. These are access prerequisites, not user-assigned engineering tests.
 
@@ -98,7 +98,7 @@ and finish command failures. No real user data or external service writes.
 Independent reproduction: finish accepted zero discovered tests and a staged defect fixed
 only in the working tree. The secret heuristic missed unquoted dotenv/YAML and C# verbatim
 literals, and flagged harmless OAuth metadata. Source comparison found missing entry-point
-invariants and performance lessons. No the source project mutations or automatic commits/pushes.
+invariants and performance lessons. No Main OS mutations or automatic commits/pushes.
 
 ### 5. Verifiable finish, worktree vs commit
 

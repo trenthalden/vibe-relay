@@ -16,7 +16,7 @@ All fixtures are temporary projects, with no real tokens, user databases or remo
 | Finish hides failure | missing commands, nonzero build/test/check, explicit N/A build, injected timeout | detached descendant cleanup; real app test quality |
 | Exit 0 but no tests ran | missing TESTS line, zero discovered, a failing module under --jobs auto | relevant coverage and honest custom runner implementation |
 | Common secret syntax missed | dotenv/YAML/C# cases, safe OAuth metadata, actual Git blobs, unstaged secrets | raw/multiline/encoded/unknown credentials |
-| Transfer map gives false completeness | 24 unique IDs, five source fingerprints, local destinations; explicit exclusions | semantic completeness of all the source project history |
+| Transfer map gives false completeness | 24 unique IDs, five source fingerprints, local destinations; explicit exclusions | semantic completeness of all Main OS history |
 | Handoff fixture has invented evidence | actual old-code 2/3 failures then fixed 3/3 pass; no commits, snapshot digest | live provider behaviour, tested separately |
 | Windows entry point broken | PowerShell preview and actual install/update; full SelfTest entry point | legacy PowerShell policy configuration |
 

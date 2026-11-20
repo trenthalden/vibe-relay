@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0
+
+- **Scheme B — gate included:** vendors lean-orchestration 0.1.0 under `vendor/lean_orchestration/` (pin
+  `vendor/lean_orchestration.SOURCE.json`) and registers `orch_gate` / `orch_dispatch` / `orch_accept`, `/orch`, the
+  lean-orchestration skill, and its `pre_tool_call` / `on_session_start` hooks **only when** a standalone
+  `lean-orchestration` plugin is not already loaded (`ctx.has_plugin`). Settings for the vendored copy live under
+  `plugins.entries.vibe-relay.settings.lean_orchestration.*`.
+- **DEV Framework 1.7.0:** refreshes `vendor/dev_framework/` from the accepted 1.7.0 worktree (base `7d4ee5c` +
+  uncommitted delta), pin `vendor/dev_framework.SOURCE.json`. Re-applies vibe-relay-required local patches
+  (`scripts/df_local_patches/`: terminal `df_check`, `skip_existing_tools`, `df_init` refuse paths, scrubbed child env,
+  `/tmp` test fixtures). Refresh helper: `scripts/vendor_refresh.py`.
+- **Night tests (VER-1 / VER-2):** fixture quota snapshots take an injected clock (no wall-clock `datetime.now()`);
+  plugin load in `test_night` uses `importlib` file-path load instead of `import __init__` under
+  `unittest discover -s tests`. Arm path stays stable across fixture dates (including +1 year).
+- **Hermes host adapter:** all Hermes internals beyond `PluginContext` go through `hermes_compat.py` (config
+  subtrees, session cwd, cron session env, account usage, delegation ABC, plugin data dir). Missing capabilities
+  are named and logged once — never silently replaced. A surface test greps the package for direct host imports.
+
 ## 0.4.0
 
 - **Night shift** for large projects left overnight: `vibe_night_start` / `vibe_night_log` / `vibe_night_status` /

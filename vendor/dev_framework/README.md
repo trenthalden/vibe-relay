@@ -96,6 +96,19 @@ doctor exit 1. ERRORS: Use case has no Test field: UC-001
 The check stopped because use case UC-001 no longer says how it is tested. Restore that field, then run doctor again.
 ```
 
+## Machine-readable navigation (`--json`, 1.7+)
+
+Orchestration tools can read project rules without parsing Markdown. With DEV Framework
+≥ 1.7.0 installed, these commands print one JSON object (UTF-8) and exit 0, or an error
+object on exit 2 (`missing_file` / `bad_config` / `bad_args`):
+
+- `python .devframework/navigate.py health --json [areas]` — healthcheck rows for SCOPE plus the named areas
+- `python .devframework/navigate.py health --paths P [P ...] --json` — areas from the optional `areas` map in `.devframework/project.json` (glob → UI/JOB/…); unmatched paths are listed in `unmapped`
+- `python .devframework/navigate.py known-errors --json [--terms …] [--text-file F] [--paths …] [--limit N] [--full]` — ranked candidates (`ke-lexical/1`); or `--ids` for cited blocks in input order; or `--areas A[,B…]` for blocks linked to those health areas (cited rule id or `**Rules:**` / `**Areas:**`)
+- `python .devframework/navigate.py ids --check ID [ID ...] --json` — known vs unknown across known errors, health rules, use cases and requirements
+
+Without `--json`, existing text output is unchanged. `navigate.py contract` names the same JSON entry points in one line.
+
 ## Two ways in
 
 Neither route is hidden. The demo above is the short way to see a result before you point the framework at code you maintain.
