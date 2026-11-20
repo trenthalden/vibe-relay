@@ -115,6 +115,29 @@ def _load_plugin():
     return mod
 
 
+class VendoredLoaderFreshTests(unittest.TestCase):
+    """A cached ``lean_orchestration_vendored`` from an earlier install must not be reused."""
+
+    def test_cached_module_is_replaced_by_this_install(self):
+        import types
+
+        plugin = _load_plugin()
+        stale = types.ModuleType("lean_orchestration_vendored")
+        stale.__file__ = "/nonexistent/old-install/vendor/lean_orchestration/__init__.py"
+        saved = sys.modules.get("lean_orchestration_vendored")
+        sys.modules["lean_orchestration_vendored"] = stale
+        try:
+            mod = plugin._load_vendored_lean_orchestration()
+            self.assertIsNot(mod, stale)
+            self.assertEqual(
+                Path(mod.__file__).resolve(),
+                (ROOT / "vendor" / "lean_orchestration" / "__init__.py").resolve(),
+            )
+        finally:
+            if saved is not None:
+                sys.modules["lean_orchestration_vendored"] = saved
+
+
 class SchemeBRegistrationTests(IsolatedHomeTest):
     def tearDown(self):
         if getattr(self, "_ctx", None) is not None:
