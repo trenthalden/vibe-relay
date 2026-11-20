@@ -1,7 +1,7 @@
 """Executor task assembly — brief + delivered rules/known errors (FR-005). Pure function.
 
 Algorithm ``lo-delivery/2``: full blocks = cited (citation order) then area-linked
-(document order); lexical candidates are titles only (KE-2026-11-20-BRIEF-RULES-SKIPPED).
+(document order); lexical candidates are titles only (FR-004 / FR-005 / INV-002).
 """
 from __future__ import annotations
 

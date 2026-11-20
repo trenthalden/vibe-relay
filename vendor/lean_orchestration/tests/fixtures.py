@@ -1,4 +1,4 @@
-"""Fixture project builders — always under TMPDIR (KE-2026-11-20-TMPDIR-NESTED-PROJECT)."""
+"""Fixture project builders — always under TMPDIR (PROJECT.md, Data and environments)."""
 from __future__ import annotations
 
 import json
@@ -65,7 +65,7 @@ LEXICAL_ONLY_KE = {
     ),
 }
 
-RUN_PATH = "MainOS.Mac/Sources/MainOSMacCore/Run/**"
+RUN_PATH = "app/Sources/AppCore/Run/**"
 
 
 def make_fixture(
@@ -123,7 +123,7 @@ def make_fixture(
         "reject_json": reject_json,
         "framework_version": framework_version,
         "path_areas": path_areas,
-        "globs": {RUN_PATH: ["MainOS.Mac/**/Run/**"]},
+        "globs": {RUN_PATH: ["app/**/Run/**"]},
         "default_areas": ["UI", "JOB", "BULK"],
         "rows": rows,
         "known_errors": known_errors,
@@ -150,7 +150,7 @@ def base_brief(
     *,
     known_errors: str = "KE-2026-09-23-MIRROR-FULL-SCAN — relevant prior defect.",
     architecture_rules: str = "UI-1, JOB-1, BULK-2 apply.",
-    allowed: str = "`MainOS.Mac/Sources/MainOSMacCore/Run/**`",
+    allowed: str = "`app/Sources/AppCore/Run/**`",
     gate: str = "python3 -B .devframework/check.py finish",
     intent: str = "Fix the due-hint timer.",
     extra_sections: str = "",

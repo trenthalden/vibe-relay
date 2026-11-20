@@ -102,7 +102,7 @@ field lists the expanded patterns.
 
 ## Tests
 
-Run with `TMPDIR` **outside** any DEV Framework project (see `KE-2026-11-20-TMPDIR-NESTED-PROJECT`):
+Run with `TMPDIR` **outside** any DEV Framework project (PROJECT.md, Data and environments):
 
 ```bash
 TMPDIR=/tmp/lo-scratch python3 -B .devframework/check.py finish

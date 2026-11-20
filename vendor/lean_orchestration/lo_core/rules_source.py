@@ -157,7 +157,7 @@ def _from_navigate(
 
     required_non_scope = sorted({a for a in areas if a != "SCOPE"})
 
-    # Call 2: lexical candidates — titles only (no --full). KE-2026-11-20-BRIEF-RULES-SKIPPED.
+    # Call 2: lexical candidates — titles only (no --full). FR-004.
     brief_path = _write_brief_copy(brief_text)
     try:
         ke_args: List[str] = ["known-errors", "--text-file", brief_path]
@@ -471,7 +471,7 @@ def glob_to_regex(glob: str) -> "re.Pattern[str]":
 
 
 def _write_brief_copy(brief_text: str) -> str:
-    # KE-2026-11-20-TMPDIR-NESTED-PROJECT: brief copy under TMPDIR, never inside a framework project.
+    # PROJECT.md, Data and environments: brief copy under TMPDIR, never inside a framework project.
     fd, path = tempfile.mkstemp(prefix="lo-brief-", suffix=".md", text=True)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:

@@ -196,7 +196,7 @@ class TestPorting(unittest.TestCase):
         repo = make_fixture()
         text = base_brief(
             architecture_rules="UI-1, JOB-1, BULK-2 apply.",
-            extra_sections="PORT FROM: MainOS.Mac/Sources/Old/File.swift:10\n",
+            extra_sections="PORT FROM: app/Sources/Old/File.swift:10\n",
         )
         brief = write_brief(os.path.join(tempfile.mkdtemp(), "brief.md"), text)
         code, result = _gate_json(repo, brief)
@@ -251,7 +251,7 @@ class TestRulesSource(unittest.TestCase):
                 {"area": "JOB", "id": "JOB-1", "rule": "job", "prevents": "z"},
                 {"area": "BULK", "id": "BULK-2", "rule": "bulk", "prevents": "w"},
             ],
-            "areas": [{"glob": "MainOS.Mac/**/Run/**", "areas": ["UI", "JOB", "BULK"]}],
+            "areas": [{"glob": "app/**/Run/**", "areas": ["UI", "JOB", "BULK"]}],
             "known_errors": [
                 {
                     "id": "KE-2026-09-23-MIRROR-FULL-SCAN",
@@ -509,7 +509,7 @@ class TestBriefGrammar(unittest.TestCase):
         arch = kwargs.get("architecture_rules", "UI-1, JOB-1, BULK-2 apply.")
         allowed = kwargs.get(
             "allowed",
-            "`MainOS.Mac/Sources/MainOSMacCore/Run/**`",
+            "`app/Sources/AppCore/Run/**`",
         )
         return (
             "# BRIEF\n\n"
@@ -547,14 +547,14 @@ class TestBriefGrammar(unittest.TestCase):
         text = base_brief(
             architecture_rules="UI-1, JOB-1, BULK-2 apply.",
             allowed=(
-                "`MainOS.Mac/Sources/MainOSMacCore/Run/**`\n\n"
+                "`app/Sources/AppCore/Run/**`\n\n"
                 "```\n## ALLOWED\n`fake/inside/fence/**`\n```\n"
             ),
         )
         brief = write_brief(os.path.join(tempfile.mkdtemp(), "brief.md"), text)
         code, result = _gate_json(repo, brief)
         self.assertEqual(code, 0, result)
-        self.assertIn("MainOS.Mac/Sources/MainOSMacCore/Run/**", result["allowed"])
+        self.assertIn("app/Sources/AppCore/Run/**", result["allowed"])
         self.assertNotIn("fake/inside/fence/**", result["allowed"])
 
     def test_brace_expansion_two_groups_and_empty_alt(self) -> None:
@@ -563,7 +563,7 @@ class TestBriefGrammar(unittest.TestCase):
             architecture_rules="UI-1, JOB-1, BULK-2 apply.",
             allowed=(
                 "`pkg/{A,B}/{,X}.swift`\n"
-                "`MainOS.Mac/Sources/MainOSMacCore/Run/**`"
+                "`app/Sources/AppCore/Run/**`"
             ),
         )
         brief = write_brief(os.path.join(tempfile.mkdtemp(), "brief.md"), text)
@@ -610,14 +610,14 @@ class TestBriefGrammar(unittest.TestCase):
 
     def test_brace_maps_runcoordinator_area(self) -> None:
         run_file = (
-            "MainOS.Mac/Sources/MainOSMac/Services/RunCoordinator.swift"
+            "app/Sources/App/Services/RunCoordinator.swift"
         )
         probe = (
-            "MainOS.Mac/Sources/MainOSMac/Services/ActivityProbe.swift"
+            "app/Sources/App/Services/ActivityProbe.swift"
         )
         repo = make_fixture(path_areas={run_file: ["UI", "JOB", "BULK"]})
         brace_pat = (
-            "MainOS.Mac/Sources/MainOSMac/Services/"
+            "app/Sources/App/Services/"
             "{ActivityProbe,RunCoordinator}.swift"
         )
         text = base_brief(
@@ -703,7 +703,7 @@ class TestRedDetectors(unittest.TestCase):
         qualified = (
             "# BRIEF\n\n"
             "## INTENT (goal)\n\nFix.\n\n"
-            "## ALLOWED (paths)\n\n`MainOS.Mac/Sources/MainOSMacCore/Run/**`\n\n"
+            "## ALLOWED (paths)\n\n`app/Sources/AppCore/Run/**`\n\n"
             "## FORBIDDEN (сверх COMMON)\n\n- other\n\n"
             "## DONE MEANS (тесты)\n\n1. Works.\n\n"
             "## GATE (local)\n\npython3 -B .devframework/check.py finish\n\n"

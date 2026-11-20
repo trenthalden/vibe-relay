@@ -1,7 +1,7 @@
 """Bypass matcher — refuse terminal/execute_code that starts a configured executor (FR-013).
 
 Pure function: no I/O. Protection against accidental bypass, not a sandbox
-(KE-2026-11-20-BRIEF-RULES-SKIPPED). One strict matcher grammar (API-4).
+(FR-013 / INV-007). One strict matcher grammar (API-4).
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def command_starts_executor(
     Command position: start, after ``;`` ``&&`` ``||`` ``|`` newline ``&`` ``(`` ``$(``
     backtick, or after recognised wrappers / interpreters. Leading ``NAME=value``
     tokens (any count) are skipped at every command position, before and after
-    wrappers (API-4; KE-2026-11-20-BRIEF-RULES-SKIPPED). Allowed: ``<binary>
+    wrappers (API-4; FR-013 / INV-007). Allowed: ``<binary>
     --version`` / ``--help``; non-command mentions (``echo cursor-agent``, ``grep …``).
     """
     if _depth > 3:

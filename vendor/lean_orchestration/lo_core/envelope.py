@@ -1,6 +1,6 @@
 """Hermes child envelope — seal and verify delegate_task context (FR-012).
 
-KE-2026-11-20-BRIEF-RULES-SKIPPED: the envelope binds goal+context so a hand-written
+FR-012 / INV-007: the envelope binds goal+context so a hand-written
 delegate_task cannot drop the delivered rules block.
 """
 from __future__ import annotations

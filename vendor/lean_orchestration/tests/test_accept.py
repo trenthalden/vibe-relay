@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = str(REPO_ROOT / "cli.py")
 FAKE_EXEC = str(REPO_ROOT / "tests" / "fake_executor.py")
 PY39 = "/usr/bin/python3"
-ALLOWED_FILE = "MainOS.Mac/Sources/MainOSMacCore/Run/Timer.swift"
+ALLOWED_FILE = "app/Sources/AppCore/Run/Timer.swift"
 OUTSIDE_FILE = "Outside/NotAllowed.swift"
 
 
@@ -249,7 +249,7 @@ class TestAcceptRenameOutside(unittest.TestCase):
 class TestAcceptUntrackedInside(unittest.TestCase):
     def test_untracked_inside_allowed_accepted(self) -> None:
         env = _setup_repo_and_dispatch()
-        new_path = "MainOS.Mac/Sources/MainOSMacCore/Run/NewFile.swift"
+        new_path = "app/Sources/AppCore/Run/NewFile.swift"
         _write(os.path.join(env["repo"], new_path), "new\n")
         result = accept_mod.accept_dispatch(
             dispatch_id=env["dispatch_id"],
@@ -549,7 +549,7 @@ class TestRedAllowedAlwaysPass(unittest.TestCase):
             "from lo_core.accept_decide import decide_accept\n"
             "r = decide_accept(\n"
             "  changed_paths=['Outside/x.swift'],\n"
-            "  allowed=['MainOS.Mac/**'],\n"
+            "  allowed=['app/**'],\n"
             "  gate_decision='PASS',\n"
             "  gate_reasons=[],\n"
             "  probe_results=[],\n"

@@ -29,4 +29,4 @@ The vendored skill is namespaced by the host plugin: `skill_view("vibe-relay:lea
 
 The vendored gate is executed fresh on every `register()`; a cached `lean_orchestration_vendored`
 module from an earlier install is never reused, because a long-lived gateway keeps `sys.modules`
-across plugin remove/install (live check 2026-11-20: the old object served the previous install's code).
+across plugin remove/install.

@@ -265,7 +265,7 @@ class SchemeBHookInterplayTests(IsolatedHomeTest):
             "goal": payload["goal"],
             "context": payload["context"],
             "lane": "executor",
-            "allowed": "MainOS.Mac/Sources/MainOSMacCore/Run/**",
+            "allowed": "app/Sources/AppCore/Run/**",
             "gate": "python3 -B .devframework/check.py finish",
         }
 

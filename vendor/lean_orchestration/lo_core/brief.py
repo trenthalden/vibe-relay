@@ -6,8 +6,8 @@ from typing import Dict, List, Optional, Sequence, Tuple, Union
 
 # cost: one pass over brief text per gate run (≤ few KB typical; 5,000 runs/day planning scale).
 
-# KE-2026-11-20-BRIEF-RULES-SKIPPED: real briefs use qualified headings; exact-only match
-# falsely refused 22–23/23 field briefs and pushed orchestrators to bypass the gate.
+# INV-006: real briefs use qualified headings; exact-only match falsely refused
+# field briefs and pushed orchestrators to bypass the gate.
 _HEADING_LINE = re.compile(r"^##\s+(.+?)\s*$")
 # API-4 / same class as DEV Framework fence skip: indent ≤ 3, 3+ backticks or tildes.
 _FENCE_MARK = re.compile(r"^ {0,3}(`{3,}|~{3,})")

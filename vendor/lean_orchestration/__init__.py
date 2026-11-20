@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 # Hyphenated plugin dir is not a normal import package name; put the plugin root on
-# sys.path so sibling modules resolve under Hermes load (same pattern as vibe-relay).
+# sys.path so sibling modules resolve under Hermes load (hyphenated plugin dir).
 #
 # Module isolation (KE-2026-11-20-STALE-TOPLEVEL-MODULES, live incident 2026-11-20):
 # Hermes loads each plugin as a package with submodule_search_locations and evicts

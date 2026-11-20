@@ -36,7 +36,7 @@ def dispatch(
 ) -> Dict[str, Any]:
     """Run the gate and, on PASS, start a CLI executor or return a hermes_child payload.
 
-    Never starts a process when the gate refuses (FR-011 / KE-BRIEF-RULES-SKIPPED).
+    Never starts a process when the gate refuses (FR-011 / INV-007).
     On PASS for a CLI executor the result includes ``_supervisor`` (Popen) for the
     plugin waiter thread; callers that serialise the result must strip keys starting
     with ``_``.
@@ -145,7 +145,7 @@ def dispatch(
         fh.flush()
         os.fsync(fh.fileno())
 
-    # BRIEF.md so orch_accept can re-run the gate without the orchestrator (KE-BRIEF-RULES-SKIPPED).
+    # BRIEF.md so orch_accept can re-run the gate without the orchestrator (FR-014 / INV-009).
     brief_file = os.path.join(run_dir, "BRIEF.md")
     with open(brief_file, "wb") as fh:
         fh.write(brief_text.encode("utf-8"))

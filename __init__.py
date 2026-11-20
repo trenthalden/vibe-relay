@@ -301,10 +301,9 @@ def _load_vendored_lean_orchestration():
         sys.path.insert(0, lo_path)
     mod_name = "lean_orchestration_vendored"
     # Always execute this install's file; never reuse a cached module. A long-lived gateway
-    # keeps sys.modules across plugin remove/install, and reusing the old object served a
-    # previous install's code (lean-orchestration KE-2026-11-20-STALE-TOPLEVEL-MODULES: the
-    # door PASSed but the executor never started). The vendored __init__ evicts foreign
-    # lo_core/lo_exec itself once it runs.
+    # keeps sys.modules across plugin remove/install, so a reused object would serve the
+    # previous install's code (the gate PASSes but the executor never starts). The vendored
+    # __init__ evicts foreign lo_core/lo_exec itself once it runs.
     sys.modules.pop(mod_name, None)
     spec = importlib.util.spec_from_file_location(mod_name, init_path)
     if spec is None or spec.loader is None:
