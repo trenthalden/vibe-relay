@@ -237,4 +237,4 @@ first. Counts are from the author's night plans and cron history, not plugin tel
 
 ## License
 
-License: TBD by author
+MIT — see [LICENSE](LICENSE).
