@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**', 'lane/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: vibe-relay
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: v0.23.3
+          path: hermes-agent
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Hermes
+        run: python -m pip install -e hermes-agent
+      - name: Test, validate and scan
+        run: python vibe-relay/.github/scripts/ci_check.py --plugin vibe-relay --hermes hermes-agent --workspace .
