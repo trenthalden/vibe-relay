@@ -112,7 +112,7 @@ def write_handoff(
         f"{note.rstrip()}\n"
     )
     if path.is_file():
-        existing = path.read_text(encoding="utf-8")
+        existing = path.read_text(encoding="utf-8-sig")
         if "## Handoff" in existing:
             path.write_text(existing.rstrip() + "\n\n## Handoff (park)\n\n" + note.rstrip() + "\n", encoding="utf-8")
             return path

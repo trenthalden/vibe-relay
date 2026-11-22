@@ -124,7 +124,7 @@ def write_json(path: Path, data: Any) -> None:
 def _fill_project_md(dest: Path) -> None:
     """Replace TODO(project) markers so DF doctor is READY (explore kind)."""
     path = dest / "PROJECT.md"
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8-sig")
     replacements = {
         "TODO(project): what you are trying out, what is still unknown, and what would tell you that it works.": (
             "Demo explore: fix `textutil.slugify` so the unit tests pass. "
@@ -172,7 +172,7 @@ def init_dev_framework(dest: Path) -> Dict[str, Any]:
         raise SystemExit(f"df_init failed:\n{out}")
     _fill_project_md(dest)
     pj_path = dest / ".devframework" / "project.json"
-    pj = json.loads(pj_path.read_text(encoding="utf-8"))
+    pj = json.loads(pj_path.read_text(encoding="utf-8-sig"))
     # Toy unittest suite, counted for finish via run_unittest.py (prints TESTS: …).
     pj["commands"]["test"] = [
         "{python}",
@@ -379,7 +379,7 @@ def load_plugin_state() -> Dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError:
         return {}
 
@@ -393,7 +393,7 @@ def seed_plugin_quota(usage: Dict[str, Any]) -> None:
     path = profile_home() / "plugin-data" / PLUGIN_NAME / "state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        state = json.loads(path.read_text(encoding="utf-8-sig")) if path.exists() else {}
     except json.JSONDecodeError:
         state = {}
     used = usage.get("used_percent")
@@ -472,7 +472,7 @@ def run_gate(cwd: Path) -> subprocess.CompletedProcess:
 def hermes_python() -> Path:
     """Interpreter that can import Hermes + this plugin (same as the hermes wrapper)."""
     # hermes launcher: …/tools/python-…/bin/python3 -I -c …
-    wrapper = hermes_bin().read_text(encoding="utf-8", errors="ignore")
+    wrapper = hermes_bin().read_text(encoding="utf-8-sig", errors="ignore")
     m = re.search(r"exec (\S+/python3) ", wrapper)
     if m and Path(m.group(1)).exists():
         return Path(m.group(1))
@@ -779,7 +779,7 @@ def scripted_negative_reject(run_dir: Path, toy_base: Path) -> Dict[str, Any]:
     )
     readme = toy / "README.md"
     readme.write_text(
-        readme.read_text(encoding="utf-8") + "\n<!-- out of scope -->\n",
+        readme.read_text(encoding="utf-8-sig") + "\n<!-- out of scope -->\n",
         encoding="utf-8",
     )
     gate = run_gate(toy)

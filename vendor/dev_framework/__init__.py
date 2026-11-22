@@ -20,7 +20,7 @@ PACKAGE = Path(__file__).resolve().parent
 MAX_LINES, MAX_CHARS = 40, 3500
 
 # Dot-folders under $HOME that must never receive a framework install.
-_PROTECTED_HOME_DOTS = (".ssh", ".aws", ".config", ".gnupg", ".kube", ".docker")
+_PROTECTED_HOME_DOTS = (".ssh", ".aws", ".config", ".gnupg", ".kube", ".docker", "AppData")
 
 
 def _path(raw: str) -> Path:
@@ -45,12 +45,14 @@ def _trim(text: str, lines: int = MAX_LINES, chars: int = MAX_CHARS) -> str:
 def _child_env() -> dict[str, str]:
     """Minimal env for DF child processes — never the full parent ``os.environ``.
 
-    Passes PATH, HOME, LANG/LC_*, SYSTEMROOT (Windows), PYTHONDONTWRITEBYTECODE.
+    Passes PATH, HOME, LANG/LC_*, Windows home/temp/system paths, PYTHONDONTWRITEBYTECODE.
     Does not pass GH_TOKEN: ``df_init`` / ``df_nav`` children do not run the optional
     ``gh`` repo-visibility check (that lives in target ``check.py`` / ``devlog`` via terminal).
     """
     env: dict[str, str] = {"PYTHONDONTWRITEBYTECODE": "1"}
-    for key in ("PATH", "HOME", "SYSTEMROOT"):
+    for key in ("PATH", "HOME", "SYSTEMROOT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH",
+                "TEMP", "TMP", "TMPDIR", "APPDATA", "LOCALAPPDATA", "SYSTEMDRIVE",
+                "WINDIR", "COMSPEC", "PATHEXT"):
         val = os.environ.get(key)
         if val is not None:
             env[key] = val
@@ -150,7 +152,10 @@ def _refuse_df_init_target(target: Path) -> str | None:
 
     for name in _PROTECTED_HOME_DOTS:
         protected = (home / name).resolve()
-        if resolved == protected or _is_under(resolved, protected):
+        normalized = Path(os.path.normcase(str(resolved)))
+        protected = Path(os.path.normcase(str(protected)))
+        separator = os.path.normcase(os.sep)
+        if normalized == protected or str(normalized).startswith(str(protected) + separator):
             return f"ERROR: refusing df_init into protected path ({protected})."
 
     if _is_git_work_tree(resolved):

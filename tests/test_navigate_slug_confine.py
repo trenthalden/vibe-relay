@@ -96,7 +96,10 @@ class NavigateSlugConfineTests(unittest.TestCase):
         shutil.copy(TEMPLATE, evil_docs / "CHECKLIST_TEMPLATE.md")
         repo2 = self.base / "symlink-repo"
         repo2.mkdir()
-        (repo2 / "docs").symlink_to(evil_docs)
+        try:
+            (repo2 / "docs").symlink_to(evil_docs, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
         before = list(evil_docs.iterdir())
         with self.assertRaises(ValueError) as ctx:
             self.nav.checklist(repo2, "new", "pwn", "title")
@@ -111,7 +114,10 @@ class NavigateSlugConfineTests(unittest.TestCase):
             encoding="utf-8",
         )
         link = self.repo / "docs" / "linked.md"
-        link.symlink_to(target)
+        try:
+            link.symlink_to(target)
+        except OSError as exc:
+            self.skipTest(f"symlinks unavailable: {exc}")
         before = target.read_text(encoding="utf-8")
         with self.assertRaises(ValueError):
             self.nav.handoff(self.repo, "linked", "should not append")

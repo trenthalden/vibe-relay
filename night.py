@@ -7,6 +7,7 @@ jobs per night (checkpoint + quota_reset + report).
 from __future__ import annotations
 
 import json
+import time
 import logging
 import os
 import re
@@ -219,7 +220,15 @@ def atomic_write(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    # cost: at most 5 attempts, 4 sleeps totaling 0.5s per write; no background loop.
+    for attempt in range(1, 6):
+        try:
+            tmp.replace(path)
+            break
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.05 * attempt)
 
 
 # ─── plan files ───────────────────────────────────────────────────────────────
@@ -348,7 +357,7 @@ def load_night_json(night_dir: Path) -> dict:
     path = night_dir / "night.json"
     if not path.is_file():
         raise ValueError(f"night.json missing under {night_dir}")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict):
         raise ValueError("night.json is not an object")
     return data

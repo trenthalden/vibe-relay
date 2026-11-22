@@ -92,10 +92,10 @@ def _ignore_df(dirpath: str, names: List[str]) -> List[str]:
 
 def _source_base(src: Path) -> str:
     """Commit of the source checkout (``+dirty`` with uncommitted changes); no local path."""
-    head = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True)
+    head = subprocess.run(["git", "-C", str(src), "rev-parse", "HEAD"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     if head.returncode != 0:
         raise SystemExit("not a git checkout: set LO_SOURCE / DF_SOURCE to a clone (%s)" % src.name)
-    dirty = subprocess.run(["git", "-C", str(src), "status", "--porcelain"], capture_output=True, text=True)
+    dirty = subprocess.run(["git", "-C", str(src), "status", "--porcelain"], capture_output=True, text=True, encoding="utf-8", errors="replace")
     return head.stdout.strip() + ("+dirty" if dirty.stdout.strip() else "")
 
 
@@ -151,7 +151,7 @@ def _write_pin(
 def _load_pin(path: Path) -> Optional[Dict[str, str]]:
     if not path.is_file():
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
     files = data.get("files") or {}
     if not isinstance(files, dict):
         return None
