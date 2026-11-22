@@ -34,6 +34,52 @@ class WindowsCompatTests(unittest.TestCase):
             self.assertFalse(ledger.pid_alive(42))
         fake.pid_exists.assert_called_once_with(42)
 
+    def test_start_token_windows_psutil(self):
+        fake = Mock()
+        fake.Process.return_value.create_time.return_value = 1700000000.1234567
+        with patch.object(ledger, "_IS_WINDOWS", True), patch.object(ledger, "psutil", fake), patch.object(subprocess, "check_output", side_effect=AssertionError("Windows must not spawn ps")):
+            self.assertEqual(ledger.process_start_token(42), "1700000000.123457")
+        fake.Process.assert_called_once_with(42)
+
+    def test_start_token_windows_ctypes(self):
+        kernel = Mock()
+        kernel.OpenProcess.return_value = 123
+
+        def process_times(handle, created, exited, kernel_time, user_time):
+            created._obj.dwHighDateTime = 1
+            created._obj.dwLowDateTime = 7
+            return 1
+
+        kernel.GetProcessTimes.side_effect = process_times
+        with patch.object(ledger, "_IS_WINDOWS", True), patch.object(ledger, "psutil", None), patch.object(ctypes, "WinDLL", return_value=kernel, create=True) as windll, patch.object(subprocess, "check_output", side_effect=AssertionError("Windows must not spawn ps")):
+            self.assertEqual(ledger.process_start_token(42), "4294967303")
+        windll.assert_called_once_with("kernel32", use_last_error=True)
+        kernel.OpenProcess.assert_called_once_with(0x1000, False, 42)
+        kernel.GetProcessTimes.assert_called_once()
+        kernel.CloseHandle.assert_called_once_with(123)
+
+    def test_start_token_windows_failures(self):
+        kernel = Mock()
+        kernel.OpenProcess.return_value = 123
+        kernel.GetProcessTimes.return_value = 0
+        fake = Mock()
+        fake.Process.side_effect = PermissionError("denied")
+        with patch.object(ledger, "_IS_WINDOWS", True), patch.object(subprocess, "check_output", side_effect=AssertionError("Windows must not spawn ps")):
+            with patch.object(ledger, "psutil", fake):
+                self.assertIsNone(ledger.process_start_token(42))
+            with patch.object(ledger, "psutil", None), patch.object(ctypes, "WinDLL", return_value=kernel, create=True):
+                self.assertIsNone(ledger.process_start_token(42))
+                kernel.CloseHandle.assert_called_once_with(123)
+                kernel.reset_mock()
+                kernel.OpenProcess.return_value = 0
+                self.assertIsNone(ledger.process_start_token(42))
+                kernel.CloseHandle.assert_not_called()
+
+    def test_start_token_posix_unchanged(self):
+        with patch.object(ledger, "_IS_WINDOWS", False), patch.object(subprocess, "check_output", return_value=b"  Sun Nov 22 12:34:56 2026\n") as output:
+            self.assertEqual(ledger.process_start_token(42), "Sun Nov 22 12:34:56 2026")
+        output.assert_called_once_with(["ps", "-p", "42", "-o", "lstart="], stderr=subprocess.DEVNULL, timeout=5)
+
     def test_stop_psutil(self):
         parent, child = Mock(), Mock()
         parent.children.return_value = [child]

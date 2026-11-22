@@ -155,7 +155,7 @@ def pid_alive(pid: Optional[int]) -> bool:
 
 
 def process_start_token(pid: Optional[int]) -> Optional[str]:
-    """Opaque OS start token for ``pid`` (``ps -o lstart=``); None if unreadable.
+    """Opaque OS start token for ``pid``; None if unreadable.
 
     Paired with ``pid_alive`` so child reconcile can tell a live host from a recycled
     PID after the dispatching process exits (FR-012). CLI supervise liveness uses
@@ -169,6 +169,30 @@ def process_start_token(pid: Optional[int]) -> Optional[str]:
         return None
     if pid_i <= 0:
         return None
+    if _IS_WINDOWS:
+        try:
+            if psutil is not None:
+                return "%.6f" % psutil.Process(pid_i).create_time()
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel.OpenProcess.restype = wintypes.HANDLE
+            kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
+            kernel.GetProcessTimes.restype = wintypes.BOOL
+            kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel.CloseHandle.restype = wintypes.BOOL
+            handle = kernel.OpenProcess(0x1000, False, pid_i)
+            if not handle:
+                return None
+            try:
+                created, exited, kernel_time, user_time = (wintypes.FILETIME() for _ in range(4))
+                if not kernel.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited), ctypes.byref(kernel_time), ctypes.byref(user_time)):
+                    return None
+                return str((created.dwHighDateTime << 32) | created.dwLowDateTime)
+            finally:
+                kernel.CloseHandle(handle)
+        except Exception:
+            # An inaccessible/exited process has no readable start token.
+            return None
     try:
         # cost: one ps per child dispatch + one per reconcile of each open child.
         out = subprocess.check_output(
