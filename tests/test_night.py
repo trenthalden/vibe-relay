@@ -205,9 +205,15 @@ class NightShiftTests(IsolatedHomeTest):
     def test_start_refusals(self):
         from night import start_night, validate_user_id
 
-        # TMPDIR may sit inside this worktree's git root — use an absolute non-git dir.
-        nogit = Path(tempfile.mkdtemp(prefix="vibe-night-nogit-", dir="/tmp"))
+        # Use the platform temp directory; this scenario requires a non-git cwd.
+        nogit = Path(tempfile.mkdtemp(prefix="vibe-night-nogit-")).resolve()
         self.addCleanup(lambda: __import__("shutil").rmtree(nogit, ignore_errors=True))
+        probe = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=str(nogit), capture_output=True, text=True,
+        )
+        if probe.returncode == 0 and probe.stdout.strip() == "true":
+            self.skipTest("resolved temp directory is inside a git work tree")
         with self.assertRaises(ValueError) as ctx:
             start_night(
                 hard_stop="08:00",

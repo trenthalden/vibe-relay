@@ -118,7 +118,7 @@
     "tests/test_agent.py": "1e8a57c1b62605c4aa3a7417e31523225619c1da28056491d8dfcef11e1e3b65",
     "tests/test_gates.py": "bf09907fbdf33ebaf391a1649ceb668f929832add5bcd7cd7945f0b28302c3ae",
     "tests/test_install.py": "183ecfa288fcb8285d177e6e009ab42033df0e0d3a3641f651fadba2740963ab",
-    "tests/test_navigate_json.py": "ba171a90bfaf74983448778c08d9ccec3552b9834bca36c7210aea1f1aff477d",
+    "tests/test_navigate_json.py": "3b0e910cb9fc4cd2f55eaceeb9356eeb36778d0dae561a53aa0d4a72227d0182",
     "tests/test_navigate_slug_confine.py": "1685d44722bfa9ce08fc802cd777277771853b80979a52738c2e665548280b71"
   },
   "source": "github.com/trenthalden/dev-framework",

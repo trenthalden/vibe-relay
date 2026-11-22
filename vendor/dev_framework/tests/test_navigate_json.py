@@ -243,7 +243,7 @@ class NavigateJsonTests(unittest.TestCase):
     def test_health_ui_text_byte_identical_without_json(self):
         result = self._run("health", "ui")
         self.assertEqual(result.returncode, 0)
-        text = result.stdout.decode("utf-8")
+        text = result.stdout.decode("utf-8").replace("\r\n", "\n")
         self.assertIn("| SCOPE-1 |", text)
         self.assertIn("| UI-1 |", text)
         self.assertNotIn("| DB-1 |", text)

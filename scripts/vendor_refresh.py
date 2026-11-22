@@ -51,6 +51,7 @@ LOCAL_DF_PATCHES = (
     ("__init__.py", "df_local_patches/__init__.py"),
     ("tests/common.py", "df_local_patches/common.py"),
     ("tests/test_install.py", "df_local_patches/test_install.py"),
+    ("tests/test_navigate_json.py", "df_local_patches/test_navigate_json.py"),
 )
 
 
