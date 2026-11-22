@@ -179,10 +179,11 @@ def _cmd_dispatch(args: Any, brief_text: str, config: Dict[str, Any]) -> int:
         if decision == "REFUSED":
             return 3
         return 3
-    # hermes_child: print sealed payload JSON; CLI executor: print id only (does not wait).
+    # hermes_child: print sealed payload JSON (incl. id); CLI executor: print id only.
     if result.get("executor") == "hermes_child":
         payload = {
             "ok": True,
+            "id": result.get("id") or "",
             "executor": "hermes_child",
             "delegate_task": result.get("delegate_task"),
             "profile": result.get("profile"),
@@ -205,7 +206,7 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 def _read_brief(value: str) -> Tuple[str, Optional[str]]:
     """Return (text, error_code). Absolute missing path → brief_not_found."""
     if os.path.isfile(value):
-        with open(value, "r", encoding="utf-8") as fh:
+        with open(value, "r", encoding="utf-8-sig") as fh:
             return fh.read(), None
     if os.path.isabs(value) and (value.endswith(".md") or os.path.sep in value):
         if not os.path.exists(value):

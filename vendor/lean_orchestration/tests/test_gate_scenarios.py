@@ -16,7 +16,7 @@ from tests.fixtures import LEXICAL_ONLY_KE, TOP_KE, base_brief, make_fixture, wr
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = str(REPO_ROOT / "cli.py")
-PY39 = "/usr/bin/python3"
+PY39 = "/usr/bin/python3" if os.path.isfile("/usr/bin/python3") else sys.executable
 
 
 class FakeCtx:
@@ -667,7 +667,11 @@ class TestRedDetectors(unittest.TestCase):
         )
         brief = write_brief(os.path.join(tempfile.mkdtemp(), "brief.md"), brief_text)
         env = os.environ.copy()
-        env["PYTHONPATH"] = str(scratch) + os.pathsep + env.get("PYTHONPATH", "")
+        # Scratch lo_core first; repo root next so cli.py can import lo_exec (Hermes
+        # PYTHONPATH does not include the project and would otherwise hide it).
+        env["PYTHONPATH"] = (
+            str(scratch) + os.pathsep + str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        )
         proc = subprocess.run(
             [PY39, "-B", str(scratch / "cli.py"), "gate", "--repo", repo, "--brief", brief, "--json"],
             capture_output=True,
@@ -712,7 +716,9 @@ class TestRedDetectors(unittest.TestCase):
         )
         brief = write_brief(os.path.join(tempfile.mkdtemp(), "brief.md"), qualified)
         env = os.environ.copy()
-        env["PYTHONPATH"] = str(scratch) + os.pathsep + env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = (
+            str(scratch) + os.pathsep + str(REPO_ROOT) + os.pathsep + env.get("PYTHONPATH", "")
+        )
         proc = subprocess.run(
             [PY39, "-B", str(scratch / "cli.py"), "gate", "--repo", repo, "--brief", brief, "--json"],
             capture_output=True,

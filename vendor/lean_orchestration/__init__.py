@@ -66,18 +66,20 @@ _WATCH_STARTED = False
 _PENDING_POST: List[Tuple[str, str]] = []  # (dispatch_id, text) — post-restart / inject miss
 _NOTIFIED: Set[str] = set()
 _LIVE_WATCH: Set[str] = set()  # open dispatches that survived reconcile (supervisor alive)
+_CHILD_SESSIONS: Dict[str, str] = {}  # child_session_id → dispatch_id (FR-012)
 _WATCH_LOCK = threading.Lock()
 
 
 def _reset_runtime_state() -> None:
     """Test helper — clear watcher / notify bookkeeping between cases."""
-    global _PLUGIN_CTX, _WATCH_STARTED, _PENDING_POST, _NOTIFIED, _LIVE_WATCH
+    global _PLUGIN_CTX, _WATCH_STARTED, _PENDING_POST, _NOTIFIED, _LIVE_WATCH, _CHILD_SESSIONS
     with _WATCH_LOCK:
         _PLUGIN_CTX = None
         _WATCH_STARTED = False
         _PENDING_POST = []
         _NOTIFIED = set()
         _LIVE_WATCH = set()
+        _CHILD_SESSIONS = {}
 
 
 def register(ctx: Any) -> None:
@@ -107,6 +109,9 @@ def register(ctx: Any) -> None:
     if hasattr(ctx, "register_hook"):
         ctx.register_hook("pre_tool_call", _pre_tool_call)
         ctx.register_hook("on_session_start", _on_session_start)
+        # FR-012: Hermes child lifecycle — link sealed [lo-dispatch:id] to session start/stop.
+        ctx.register_hook("subagent_start", _on_subagent_start)
+        ctx.register_hook("subagent_stop", _on_subagent_stop)
 
     if hasattr(ctx, "register_command"):
         try:
@@ -216,7 +221,10 @@ def _orch_dispatch_schema() -> Dict[str, Any]:
                 },
                 "executor": {
                     "type": "string",
-                    "description": "Configured executor name, or hermes_child",
+                    "description": (
+                        "Configured executor name, or hermes_child (Hermes) / "
+                        "claude_subagent (Claude Code) for a sealed child payload"
+                    ),
                 },
                 "profile": {
                     "type": "string",
@@ -629,6 +637,97 @@ def _on_session_start(**kwargs: Any) -> None:
         _maybe_start_watch_loop(ctx, data_dir)
 
 
+def _on_subagent_start(**kwargs: Any) -> None:
+    """Remember child_session_id → open dispatch id from the sealed goal (SEC-2 / FR-012)."""
+    ctx = _PLUGIN_CTX
+    if ctx is None:
+        return
+    data_dir = _data_dir(ctx)
+    if not data_dir:
+        return
+    child_session_id = kwargs.get("child_session_id")
+    child_goal = str(kwargs.get("child_goal") or "")
+    if not child_session_id:
+        return
+    dispatch_id = dispatch_mod.extract_dispatch_id_from_goal(child_goal)
+    if not dispatch_id:
+        return
+    open_ids = {
+        str(ev.get("id") or "")
+        for ev in ledger_mod.open_dispatches(ledger_mod.ledger_path(data_dir))
+    }
+    if dispatch_id not in open_ids:
+        return
+    sid = str(child_session_id)
+    with _WATCH_LOCK:
+        _CHILD_SESSIONS[sid] = dispatch_id
+    # cost: one ledger line per child start; ≤ concurrent children per parent turn.
+    ledger_mod.append_event(
+        ledger_mod.ledger_path(data_dir),
+        {
+            "event": "child_started",
+            "id": dispatch_id,
+            "child_session_id": sid,
+            "executor": dispatch_mod.HERMES_CHILD,
+        },
+    )
+
+
+def _on_subagent_stop(**kwargs: Any) -> None:
+    """Record ended + completion once for a known child; ignore unknowns (FR-012)."""
+    ctx = _PLUGIN_CTX
+    if ctx is None:
+        return
+    data_dir = _data_dir(ctx)
+    if not data_dir:
+        return
+    child_session_id = kwargs.get("child_session_id")
+    if not child_session_id:
+        return
+    sid = str(child_session_id)
+    with _WATCH_LOCK:
+        dispatch_id = _CHILD_SESSIONS.pop(sid, None)
+    if not dispatch_id:
+        return
+    led = ledger_mod.ledger_path(data_dir)
+    already = any(
+        ev.get("event") == "ended" and str(ev.get("id")) == dispatch_id
+        for ev in ledger_mod.read_events(led)
+    )
+    if already:
+        return
+    run_dir = os.path.join(data_dir, "runs", dispatch_id)
+    dispatched = None
+    for ev in ledger_mod.read_events(led):
+        if ev.get("event") == "dispatched" and str(ev.get("id") or "") == dispatch_id:
+            dispatched = ev
+    if dispatched and dispatched.get("run_dir"):
+        run_dir = str(dispatched.get("run_dir"))
+    duration_ms = kwargs.get("duration_ms")
+    seconds = None
+    if isinstance(duration_ms, (int, float)):
+        seconds = round(float(duration_ms) / 1000.0, 4)
+    child_status = kwargs.get("child_status")
+    ended = {
+        "event": "ended",
+        "id": dispatch_id,
+        "executor": dispatch_mod.HERMES_CHILD,
+        "workdir": (dispatched or {}).get("workdir"),
+        "brief_sha256": (dispatched or {}).get("brief_sha256"),
+        "task_sha256": (dispatched or {}).get("task_sha256"),
+        "run_dir": run_dir,
+        "rc": None,
+        "seconds": seconds,
+        "timed_out": False,
+        "receipt_present": os.path.isfile(os.path.join(run_dir, "RECEIPT.md")),
+        "ended": "",
+        "evidence": "subagent_stop",
+        "child_status": child_status,
+    }
+    ledger_mod.append_event(led, ended)
+    _notify_completion(ctx, ended, via_inject=True)
+
+
 def _apply_reconcile(ctx: Any, data_dir: str) -> None:
     """Reconcile open dispatches. Ended → pending post; live → LIVE_WATCH."""
     actions = dispatch_mod.reconcile(data_dir)
@@ -830,7 +929,7 @@ def _gate_public(result: Dict[str, Any]) -> Dict[str, Any]:
 def _resolve_brief(value: str) -> tuple:
     """Return (text, error_code_or_None)."""
     if os.path.isabs(value) and os.path.isfile(value):
-        with open(value, "r", encoding="utf-8") as fh:
+        with open(value, "r", encoding="utf-8-sig") as fh:
             return fh.read(), None
     if os.path.isabs(value) and (value.endswith(".md") or os.sep in value):
         if not os.path.exists(value):

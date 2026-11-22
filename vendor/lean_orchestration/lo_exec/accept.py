@@ -50,7 +50,7 @@ def accept_dispatch(
             cfg=cfg,
             extra={"dispatch_id": dispatch_id, "detail": "brief_missing"},
         )
-    with open(brief_path, "r", encoding="utf-8") as fh:
+    with open(brief_path, "r", encoding="utf-8-sig") as fh:
         brief_text = fh.read()
 
     repo = str(dispatched.get("repo") or workdir)
@@ -410,7 +410,7 @@ def load_probes(
     raw: Any = None
     if os.path.isfile(path):
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, "r", encoding="utf-8-sig") as fh:
                 raw = json.load(fh)
         except (OSError, json.JSONDecodeError):
             return [], "bad_probes"

@@ -9,3 +9,5 @@ provides_tools:
 provides_hooks:
   - pre_tool_call
   - on_session_start
+  - subagent_start
+  - subagent_stop

@@ -27,7 +27,7 @@ from tests.fixtures import base_brief, make_fixture, write_brief
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = str(REPO_ROOT / "cli.py")
 FAKE_EXEC = str(REPO_ROOT / "tests" / "fake_executor.py")
-PY39 = "/usr/bin/python3"
+PY39 = "/usr/bin/python3" if os.path.isfile("/usr/bin/python3") else sys.executable
 PY314 = "/opt/homebrew/bin/python3"
 
 # ContextVar set by tests before orch_dispatch; waiter inject must see it (C1).
@@ -35,7 +35,11 @@ WAITER_MARKER = contextvars.ContextVar("lo_c1_waiter_marker", default=None)
 
 
 def _pid_runnable(pid: int) -> bool:
-    """True if pid exists and is not a zombie (macOS/Linux)."""
+    """Windows-safe liveness, excluding POSIX zombies awaiting reaping."""
+    if not ledger_mod.pid_alive(pid):
+        return False
+    if os.name == "nt":
+        return True
     try:
         out = subprocess.check_output(
             ["ps", "-p", str(pid), "-o", "state="],
@@ -278,22 +282,22 @@ class TestWallTimeoutKillsGroup(unittest.TestCase):
         self.assertTrue(exit_info.get("timed_out"), exit_info)
         gc_path = os.path.join(run_dir, "TASK.md.grandchild_pid")
         deadline = time.time() + 5
-        gc_pid = None
-        if os.path.isfile(gc_path):
-            with open(gc_path, "r", encoding="utf-8") as fh:
-                gc_pid = int(fh.read().strip())
-        if gc_pid:
-            while time.time() < deadline:
-                if not _pid_runnable(gc_pid):
-                    break
-                time.sleep(0.1)
-            self.assertFalse(_pid_runnable(gc_pid), "grandchild still runnable pid=%s" % gc_pid)
+        self.assertTrue(os.path.isfile(gc_path), "grandchild pid evidence missing")
+        with open(gc_path, "r", encoding="utf-8") as fh:
+            gc_pid = int(fh.read().strip())
+        self.assertGreater(gc_pid, 0)
+        while time.time() < deadline:
+            if not _pid_runnable(gc_pid):
+                break
+            time.sleep(0.1)
+        self.assertFalse(_pid_runnable(gc_pid), "grandchild still runnable pid=%s" % gc_pid)
         sup = int(result["pid"])
         while time.time() < deadline:
-            try:
-                os.waitpid(sup, os.WNOHANG)
-            except ChildProcessError:
-                break
+            if os.name != "nt":
+                try:
+                    os.waitpid(sup, os.WNOHANG)  # windows-footgun: ok — POSIX-only reap.
+                except ChildProcessError:
+                    break
             if not _pid_runnable(sup):
                 break
             time.sleep(0.1)
@@ -735,6 +739,48 @@ class TestCliDispatch(unittest.TestCase):
         run_dir = os.path.join(data_dir, "runs", dispatch_id)
         self.assertIsNotNone(dispatch_mod.wait_for_exit(run_dir, timeout_s=30))
 
+    def test_cli_hermes_child_json_carries_id(self) -> None:
+        repo = make_fixture()
+        brief = _pass_brief(repo)
+        workdir = tempfile.mkdtemp(prefix="lo-wd-")
+        data_dir = tempfile.mkdtemp(prefix="lo-data-")
+        cfg_path = os.path.join(tempfile.mkdtemp(), "cfg.json")
+        with open(cfg_path, "w", encoding="utf-8") as fh:
+            json.dump(_executor_config(), fh)
+        env = os.environ.copy()
+        env.setdefault("TMPDIR", os.environ.get("TMPDIR") or tempfile.gettempdir())
+        env["PYTHONIOENCODING"] = "utf-8"
+        proc = subprocess.run(
+            [
+                PY39,
+                "-B",
+                CLI,
+                "dispatch",
+                "--repo",
+                repo,
+                "--brief",
+                brief,
+                "--workdir",
+                workdir,
+                "--executor",
+                "hermes_child",
+                "--data-dir",
+                data_dir,
+                "--config",
+                cfg_path,
+            ],
+            capture_output=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr.decode("utf-8", "replace"))
+        payload = json.loads(proc.stdout.decode("utf-8"))
+        self.assertTrue(payload.get("ok"), payload)
+        self.assertTrue(payload.get("id"), payload)
+        self.assertEqual(payload.get("executor"), "hermes_child")
+        self.assertIn("[lo-dispatch:%s]" % payload["id"], payload["delegate_task"]["goal"])
+        self.assertTrue(os.path.isdir(os.path.join(data_dir, "runs", payload["id"])))
+
 
 class TestRedBypassMatcher(unittest.TestCase):
     def test_red_disabled_matcher_on_scratch(self) -> None:
@@ -825,6 +871,19 @@ class TestHooksRegistered(unittest.TestCase):
         self.assertIn("orch_dispatch", ctx.tools)
         self.assertIn("pre_tool_call", ctx.hooks)
         self.assertIn("on_session_start", ctx.hooks)
+        # Every registered hook and tool is declared in plugin.yaml (`hermes plugins validate`).
+        declared_hooks, declared_tools, section = set(), set(), None
+        for line in yaml_text.splitlines():
+            if line.startswith("provides_hooks:"):
+                section = declared_hooks
+            elif line.startswith("provides_tools:"):
+                section = declared_tools
+            elif line.startswith("  - ") and section is not None:
+                section.add(line[4:].strip())
+            elif line and not line.startswith(" "):
+                section = None
+        self.assertEqual(set(ctx.hooks) - declared_hooks, set())
+        self.assertEqual(set(ctx.tools) - declared_tools, set())
 
 
 class TestUnknownExecutor(unittest.TestCase):
@@ -851,6 +910,22 @@ class TestUnknownExecutor(unittest.TestCase):
         self.assertTrue(not os.path.isdir(runs) or not os.listdir(runs))
 
 
+def _git_init_workdir(root: str) -> None:
+    subprocess.check_call(["git", "init"], cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.check_call(["git", "config", "user.email", "lo@example.com"], cwd=root)
+    subprocess.check_call(["git", "config", "user.name", "lo"], cwd=root)
+    allowed = os.path.join(root, "app/Sources/AppCore/Run/Timer.swift")
+    os.makedirs(os.path.dirname(allowed), exist_ok=True)
+    with open(allowed, "w", encoding="utf-8") as fh:
+        fh.write("base\n")
+    outside = os.path.join(root, "Outside/NotAllowed.swift")
+    os.makedirs(os.path.dirname(outside), exist_ok=True)
+    with open(outside, "w", encoding="utf-8") as fh:
+        fh.write("outside-base\n")
+    subprocess.check_call(["git", "add", "-A"], cwd=root, stdout=subprocess.DEVNULL)
+    subprocess.check_call(["git", "commit", "-m", "seed"], cwd=root, stdout=subprocess.DEVNULL)
+
+
 class TestHermesChildPayload(unittest.TestCase):
     def test_hermes_child_returns_sealed_payload(self) -> None:
         plugin = _load_plugin()
@@ -869,12 +944,277 @@ class TestHermesChildPayload(unittest.TestCase):
         )
         result = json.loads(raw)
         self.assertTrue(result.get("ok"), result)
+        self.assertTrue(result.get("id"), result)
         payload = result["delegate_task"]
         ok, reason = verify_envelope(payload["goal"], payload["context"])
         self.assertTrue(ok, reason)
+        self.assertIn("[lo-dispatch:%s]" % result["id"], payload["goal"])
         self.assertIn("Project rules delivered by lean-orchestration", payload["context"])
         led = ledger_mod.ledger_path(str(ctx.state.data_dir))
-        self.assertTrue(not os.path.isfile(led) or "dispatched" not in open(led, encoding="utf-8").read())
+        with open(led, encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn('"event":"dispatched"', text)
+        self.assertIn(result["id"], text)
+        run_dir = result["run_dir"]
+        self.assertTrue(os.path.isfile(os.path.join(run_dir, "BRIEF.md")))
+        self.assertTrue(os.path.isfile(os.path.join(run_dir, "TASK.md")))
+
+    def test_hermes_child_accept_allowed_and_outside(self) -> None:
+        plugin = _load_plugin()
+        ctx = FakeCtx(config=_executor_config())
+        plugin.register(ctx)
+        repo = make_fixture()
+        _git_init_workdir(repo)
+        brief = _pass_brief(repo)
+        raw = ctx.tools["orch_dispatch"]["handler"](
+            {"repo": repo, "brief": brief, "workdir": repo, "executor": "hermes_child"}
+        )
+        result = json.loads(raw)
+        self.assertTrue(result.get("ok"), result)
+        dispatch_id = result["id"]
+        allowed = os.path.join(repo, "app/Sources/AppCore/Run/Timer.swift")
+        with open(allowed, "w", encoding="utf-8") as fh:
+            fh.write("changed-ok\n")
+        acc_raw = ctx.tools["orch_accept"]["handler"]({"dispatch_id": dispatch_id})
+        acc = json.loads(acc_raw)
+        self.assertEqual(acc["decision"], "ACCEPTED", acc)
+        outside = os.path.join(repo, "Outside/NotAllowed.swift")
+        with open(outside, "w", encoding="utf-8") as fh:
+            fh.write("changed-bad\n")
+        # Fresh dispatch for the outside case (base snapshot must precede the outside edit).
+        plugin2 = _load_plugin()
+        ctx2 = FakeCtx(config=_executor_config())
+        plugin2.register(ctx2)
+        raw2 = ctx2.tools["orch_dispatch"]["handler"](
+            {"repo": repo, "brief": brief, "workdir": repo, "executor": "hermes_child"}
+        )
+        res2 = json.loads(raw2)
+        with open(outside, "w", encoding="utf-8") as fh:
+            fh.write("changed-bad-2\n")
+        rej = json.loads(ctx2.tools["orch_accept"]["handler"]({"dispatch_id": res2["id"]}))
+        self.assertEqual(rej["decision"], "REJECTED", rej)
+        self.assertTrue(
+            any(str(r).startswith("path_outside_allowed:") for r in rej.get("reasons") or []),
+            rej,
+        )
+
+    def test_subagent_start_stop_once_and_unknown_ignored(self) -> None:
+        plugin = _load_plugin()
+        ctx = FakeCtx(config=_executor_config())
+        plugin.register(ctx)
+        self.assertIn("subagent_start", ctx.hooks)
+        self.assertIn("subagent_stop", ctx.hooks)
+        repo = make_fixture()
+        brief = _pass_brief(repo)
+        workdir = tempfile.mkdtemp(prefix="lo-wd-")
+        result = json.loads(
+            ctx.tools["orch_dispatch"]["handler"](
+                {"repo": repo, "brief": brief, "workdir": workdir, "executor": "hermes_child"}
+            )
+        )
+        dispatch_id = result["id"]
+        goal = result["delegate_task"]["goal"]
+        ctx.hooks["subagent_start"](
+            child_session_id="child-sess-1",
+            child_goal=goal,
+        )
+        led = ledger_mod.ledger_path(str(ctx.state.data_dir))
+        events = ledger_mod.read_events(led)
+        self.assertTrue(
+            any(e.get("event") == "child_started" and e.get("id") == dispatch_id for e in events),
+            events,
+        )
+        ctx.hooks["subagent_stop"](
+            child_session_id="child-sess-1",
+            child_status="completed",
+            duration_ms=1500,
+        )
+        events = ledger_mod.read_events(led)
+        ended = [e for e in events if e.get("event") == "ended" and e.get("id") == dispatch_id]
+        self.assertEqual(len(ended), 1, events)
+        self.assertEqual(ended[0].get("evidence"), "subagent_stop")
+        self.assertEqual(ended[0].get("child_status"), "completed")
+        self.assertEqual(ended[0].get("seconds"), 1.5)
+        self.assertEqual(len(ctx.injected), 1)
+        self.assertIn("status=completed", ctx.injected[0][0])
+        self.assertIn(dispatch_id, ctx.injected[0][0])
+        # Second stop adds nothing.
+        ctx.hooks["subagent_stop"](
+            child_session_id="child-sess-1",
+            child_status="completed",
+            duration_ms=1500,
+        )
+        events2 = ledger_mod.read_events(led)
+        self.assertEqual(
+            len([e for e in events2 if e.get("event") == "ended" and e.get("id") == dispatch_id]),
+            1,
+        )
+        self.assertEqual(len(ctx.injected), 1)
+        # Unknown child ignored.
+        before = len(events2)
+        ctx.hooks["subagent_start"](child_session_id="other", child_goal="no tag here")
+        ctx.hooks["subagent_stop"](child_session_id="other", child_status="completed", duration_ms=10)
+        self.assertEqual(len(ledger_mod.read_events(led)), before)
+
+    def test_edited_dispatch_id_in_goal_refused(self) -> None:
+        plugin = _load_plugin()
+        cfg = _executor_config()
+        ctx = FakeCtx(config=cfg)
+        plugin.register(ctx)
+        repo = make_fixture()
+        brief = _pass_brief(repo)
+        workdir = tempfile.mkdtemp(prefix="lo-wd-")
+        result = json.loads(
+            ctx.tools["orch_dispatch"]["handler"](
+                {"repo": repo, "brief": brief, "workdir": workdir, "executor": "hermes_child"}
+            )
+        )
+        payload = result["delegate_task"]
+        edited_goal = payload["goal"].replace(result["id"], "ffffffffffff")
+        blocked = ctx.hooks["pre_tool_call"](
+            "delegate_task",
+            {"goal": edited_goal, "context": payload["context"]},
+        )
+        self.assertEqual(blocked["action"], "block")
+        self.assertIn("envelope_mismatch", blocked["message"])
+
+    def test_child_stays_open_across_session_start(self) -> None:
+        """CORRECTION-1: a new session in the same live host must not host_restarted the child."""
+        plugin = _load_plugin()
+        ctx = FakeCtx(config=_executor_config())
+        plugin.register(ctx)
+        repo = make_fixture()
+        brief = _pass_brief(repo)
+        workdir = tempfile.mkdtemp(prefix="lo-wd-")
+        result = json.loads(
+            ctx.tools["orch_dispatch"]["handler"](
+                {"repo": repo, "brief": brief, "workdir": workdir, "executor": "hermes_child"}
+            )
+        )
+        dispatch_id = result["id"]
+        led = ledger_mod.ledger_path(str(ctx.state.data_dir))
+        dispatched = [
+            e for e in ledger_mod.read_events(led) if e.get("event") == "dispatched" and e.get("id") == dispatch_id
+        ][0]
+        self.assertEqual(dispatched.get("host_pid"), os.getpid())
+        self.assertTrue(dispatched.get("host_started"))
+        # Another session on the same profile/data dir.
+        ctx.hooks["on_session_start"]()
+        open_ids = {str(e.get("id")) for e in ledger_mod.open_dispatches(led)}
+        self.assertIn(dispatch_id, open_ids)
+        self.assertFalse(any(e.get("event") == "ended" and e.get("id") == dispatch_id for e in ledger_mod.read_events(led)))
+        goal = result["delegate_task"]["goal"]
+        ctx.hooks["subagent_start"](child_session_id="live-child", child_goal=goal)
+        ctx.hooks["subagent_stop"](child_session_id="live-child", child_status="completed", duration_ms=900)
+        ended = [e for e in ledger_mod.read_events(led) if e.get("event") == "ended" and e.get("id") == dispatch_id]
+        self.assertEqual(len(ended), 1, ended)
+        self.assertEqual(ended[0].get("evidence"), "subagent_stop")
+        self.assertEqual(len(ctx.injected), 1)
+
+    def test_child_reconcile_host_restarted(self) -> None:
+        """CORRECTION-1: dead host_pid → host_restarted (spawn+reap a short child for a dead pid)."""
+        dead = subprocess.Popen([sys.executable or "python3", "-c", "pass"])
+        dead_pid = dead.pid
+        dead.wait(timeout=10)
+        data_dir = tempfile.mkdtemp(prefix="lo-data-")
+        run_dir = os.path.join(data_dir, "runs", "dddddddddddd")
+        os.makedirs(run_dir, exist_ok=True)
+        led = ledger_mod.ledger_path(data_dir)
+        ledger_mod.append_event(
+            led,
+            {
+                "event": "dispatched",
+                "id": "dddddddddddd",
+                "executor": "hermes_child",
+                "workdir": data_dir,
+                "brief_sha256": "x",
+                "task_sha256": "y",
+                "run_dir": run_dir,
+                "profile": "code",
+                "base_head": None,
+                "base_dirty": [],
+                "host_pid": dead_pid,
+                "host_started": "dead-process-token",
+            },
+        )
+        actions = dispatch_mod.reconcile(data_dir)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0].get("event"), "ended")
+        self.assertEqual(actions[0].get("evidence"), "host_restarted")
+        self.assertEqual(actions[0].get("child_status"), "host_restarted")
+
+    def test_red_child_host_liveness_dropped_on_scratch(self) -> None:
+        """VER-3: drop host liveness in reconcile → live-host session_start falsely ends the child."""
+        scratch = Path(tempfile.mkdtemp(prefix="lo-red-child-host-"))
+        for name in ("lo_core", "lo_exec", "tests", "cli.py", "__init__.py", "plugin.yaml"):
+            src = REPO_ROOT / name
+            dst = scratch / name
+            if src.is_dir():
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        dispatch_path = scratch / "lo_exec" / "dispatch.py"
+        text = dispatch_path.read_text(encoding="utf-8")
+        needle = "if ledger_mod.host_process_alive("
+        self.assertIn(needle, text)
+        # RED: always treat the child host as gone.
+        mutated = text.replace(
+            needle,
+            "if False and ledger_mod.host_process_alive(",
+            1,
+        )
+        self.assertNotEqual(text, mutated)
+        dispatch_path.write_text(mutated, encoding="utf-8")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(scratch)
+        env.setdefault("TMPDIR", os.environ.get("TMPDIR") or tempfile.gettempdir())
+        probe = (
+            "import json, os, tempfile\n"
+            "from tests.test_dispatch import FakeCtx, _executor_config, _load_plugin, _pass_brief\n"
+            "from lo_exec import ledger as ledger_mod\n"
+            "from tests.fixtures import make_fixture\n"
+            "plugin = _load_plugin()\n"
+            "ctx = FakeCtx(config=_executor_config())\n"
+            "plugin.register(ctx)\n"
+            "repo = make_fixture()\n"
+            "result = json.loads(ctx.tools['orch_dispatch']['handler']("
+            "{'repo': repo, 'brief': _pass_brief(repo), 'workdir': tempfile.mkdtemp(prefix='lo-wd-'),"
+            " 'executor': 'hermes_child'}))\n"
+            "dispatch_id = result['id']\n"
+            "ctx.hooks['on_session_start']()\n"
+            "led = ledger_mod.ledger_path(str(ctx.state.data_dir))\n"
+            "open_ids = {str(e.get('id')) for e in ledger_mod.open_dispatches(led)}\n"
+            "assert dispatch_id in open_ids, 'expected child to stay open on live host; got ended'\n"
+        )
+        proc = subprocess.run(
+            [PY39, "-B", "-c", probe],
+            capture_output=True,
+            env=env,
+            timeout=60,
+            cwd=str(scratch),
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        err = (proc.stderr + proc.stdout).decode("utf-8", "replace")
+        self.assertIn("expected child to stay open on live host", err)
+        print("RED_CHILD_HOST_ASSERTION=%r" % err.strip().splitlines()[-1][:240])
+
+    def test_orch_counts_child_dispatches(self) -> None:
+        from tests.test_accept import FakeCtx as AcceptFakeCtx
+
+        plugin = _load_plugin()
+        ctx = AcceptFakeCtx(config=_executor_config())
+        plugin.register(ctx)
+        repo = make_fixture()
+        brief = _pass_brief(repo)
+        workdir = tempfile.mkdtemp(prefix="lo-wd-")
+        result = json.loads(
+            ctx.tools["orch_dispatch"]["handler"](
+                {"repo": repo, "brief": brief, "workdir": workdir, "executor": "hermes_child"}
+            )
+        )
+        text = ctx.commands["orch"]["handler"]("")
+        self.assertIn(result["id"], text)
+        self.assertIn("executor=hermes_child", text)
 
 
 class TestConfigKeyErrors(unittest.TestCase):

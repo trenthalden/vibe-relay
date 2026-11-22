@@ -23,7 +23,7 @@ from tests.fixtures import base_brief, make_fixture, write_brief
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FAKE_EXEC = str(REPO_ROOT / "tests" / "fake_executor.py")
-PY39 = "/usr/bin/python3"
+PY39 = "/usr/bin/python3" if os.path.isfile("/usr/bin/python3") else sys.executable
 
 # Names that must not collide with a prior plugin load in this process.
 _LOAD_SEQ = 0

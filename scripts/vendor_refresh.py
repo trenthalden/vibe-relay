@@ -39,6 +39,7 @@ LO_ITEMS = (
     "tests",
 )
 LO_VERSION = "0.1.0"
+LO_CLAUDE_CODE_ONLY = ("skills/orch", "tests/test_claude_code.py")
 
 DF_SOURCE = Path(os.environ.get("DF_SOURCE", "")).expanduser()
 DF_PUBLIC = "github.com/trenthalden/dev-framework"
@@ -113,6 +114,13 @@ def _copy_lo(dst: Path) -> None:
             shutil.copytree(src, target, ignore=_ignore_pycache)
         else:
             shutil.copy2(src, target)
+    # The Claude Code adapter (cc_adapter.py) is not vendored, so neither are its skill and tests.
+    for rel in LO_CLAUDE_CODE_ONLY:
+        path = dst / rel
+        if path.is_dir():
+            shutil.rmtree(path)
+        elif path.exists():
+            path.unlink()
 
 
 def _copy_df(dst: Path) -> None:

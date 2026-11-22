@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import os
 import signal
+import subprocess
 import sys
 import time
 
@@ -31,13 +32,20 @@ def main(argv=None) -> int:
 
     child_pid = None
     if args.spawn_grandchild:
-        pid = os.fork()
-        if pid == 0:
-            # Grandchild ignores TERM briefly so the supervisor must kill the group.
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
-            time.sleep(args.grandchild_sleep)
-            os._exit(0)
-        child_pid = pid
+        if os.name == "nt":
+            grandchild = subprocess.Popen([
+                sys.executable, "-c",
+                "import time; time.sleep(%r)" % args.grandchild_sleep,
+            ])
+            child_pid = grandchild.pid
+        else:
+            pid = os.fork()  # windows-footgun: ok — POSIX-only fixture.
+            if pid == 0:
+                # Grandchild ignores TERM so the supervisor must kill the group.
+                signal.signal(signal.SIGTERM, signal.SIG_IGN)  # windows-footgun: ok
+                time.sleep(args.grandchild_sleep)
+                os._exit(0)
+            child_pid = pid
         # Record grandchild pid next to the task for the test to assert.
         marker = args.task_file + ".grandchild_pid"
         with open(marker, "w", encoding="utf-8") as fh:

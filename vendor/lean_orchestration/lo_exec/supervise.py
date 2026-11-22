@@ -11,7 +11,14 @@ import argparse
 import json
 import os
 import signal
+import shutil
 import subprocess
+
+_IS_WINDOWS = os.name == "nt"
+try:
+    import psutil
+except ImportError:
+    psutil = None
 import sys
 import time
 from datetime import datetime
@@ -25,7 +32,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     run_dir = os.path.abspath(args.run_dir)
     launch_path = os.path.join(run_dir, "launch.json")
     try:
-        with open(launch_path, "r", encoding="utf-8") as fh:
+        with open(launch_path, "r", encoding="utf-8-sig") as fh:
             launch = json.load(fh)
     except (OSError, json.JSONDecodeError) as exc:
         _write_exit(
@@ -169,24 +176,57 @@ def _popen(argv: List[str], *, cwd: str, env: Dict[str, str], log_fh):
         env=env,
         stdout=log_fh,
         stderr=subprocess.STDOUT,
-        start_new_session=True,
+        **({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)}
+           if _IS_WINDOWS else {"start_new_session": True}),
     )
 
 
 def _kill_group(pgid: int, grace_s: float) -> None:
+    if _IS_WINDOWS:
+        if psutil is not None:
+            try:
+                parent = psutil.Process(pgid)
+                processes = parent.children(recursive=True) + [parent]
+            except psutil.NoSuchProcess:
+                return
+            for process in processes:
+                try:
+                    process.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            _, alive = psutil.wait_procs(processes, timeout=grace_s)
+            for process in alive:
+                try:
+                    process.kill()
+                except psutil.NoSuchProcess:
+                    pass
+        else:
+            taskkill = shutil.which("taskkill")
+            if taskkill is None:
+                raise FileNotFoundError("taskkill is required to stop the Windows executor tree")
+            argv = [taskkill, "/PID", str(pgid), "/T"]
+            # cost: at most two taskkill calls per timed-out dispatch, no polling.
+            stopper = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            try:
+                stopper.wait(timeout=grace_s)
+            except subprocess.TimeoutExpired:
+                pass
+            # /F also covers a completed graceful taskkill that left resistant children.
+            subprocess.run(argv + ["/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        return
     try:
-        os.killpg(pgid, signal.SIGTERM)
+        os.killpg(pgid, signal.SIGTERM)  # windows-footgun: ok — POSIX-only after Windows return.
     except (ProcessLookupError, OSError):
         return
     deadline = time.monotonic() + max(0.0, grace_s)
     while time.monotonic() < deadline:
         try:
-            os.killpg(pgid, 0)
+            os.killpg(pgid, 0)  # windows-footgun: ok — POSIX-only after Windows return.
         except (ProcessLookupError, OSError):
             return
         time.sleep(0.1)
     try:
-        os.killpg(pgid, signal.SIGKILL)
+        os.killpg(pgid, signal.SIGKILL)  # windows-footgun: ok — POSIX-only after Windows return.
     except (ProcessLookupError, OSError):
         return
 

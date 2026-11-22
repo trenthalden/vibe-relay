@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -14,9 +15,13 @@ from lo_core.gate import run_gate
 from lo_exec import ledger as ledger_mod
 from lo_exec.accept import capture_git_base
 
+_IS_WINDOWS = os.name == "nt"
 PLUGIN_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SUPERVISE_PY = os.path.join(PLUGIN_ROOT, "lo_exec", "supervise.py")
 HERMES_CHILD = "hermes_child"
+# Fixed goal prefix; dispatch id is appended as [lo-dispatch:<id>] and sealed (FR-012).
+CHILD_GOAL = "Execute the sealed lean-orchestration task exactly."
+DISPATCH_TAG_RE = re.compile(r"\[lo-dispatch:([0-9a-f]{12})\]")
 
 
 def dispatch(
@@ -81,22 +86,18 @@ def dispatch(
     profile_name = str(gate.get("profile") or profile or "code")
 
     if executor == HERMES_CHILD:
-        payload = _hermes_child_payload(task_text)
-        child_out = {
-            "ok": True,
-            "decision": "PASS",
-            "reasons": [],
-            "id": "",
-            "executor": HERMES_CHILD,
-            "profile": profile_name,
-            "delegate_task": payload,
-            "gate": gate,
-            "task_sha256": task_sha,
-            "brief_sha256": brief_sha,
-        }
-        if gate.get("gate_disabled"):
-            child_out["gate_disabled"] = True
-        return child_out
+        return _dispatch_child(
+            repo=repo,
+            brief_text=brief_text,
+            workdir=workdir,
+            data_dir=data_dir,
+            task_bytes=task_bytes,
+            task_text=task_text,
+            task_sha=task_sha,
+            brief_sha=brief_sha,
+            profile_name=profile_name,
+            gate=gate,
+        )
 
     try:
         ex = get_executor(cfg, executor)
@@ -203,7 +204,8 @@ def dispatch(
                 cwd=run_dir,
                 stdout=sup_log,
                 stderr=subprocess.STDOUT,
-                start_new_session=True,
+                **({"creationflags": getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x200)}
+                   if _IS_WINDOWS else {"start_new_session": True}),
             )
     except OSError as exc:
         return {
@@ -263,10 +265,97 @@ def make_dispatch_id(task_bytes: bytes, workdir: str, executor: str, seq: int) -
     return hashlib.sha256(material).hexdigest()[:12]
 
 
-def _hermes_child_payload(task_text: str) -> Dict[str, str]:
-    goal = "Execute the sealed lean-orchestration task exactly."
-    context = seal_context(goal, task_text)
-    return {"goal": goal, "context": context}
+def child_goal_for_id(dispatch_id: str) -> str:
+    """Goal sealed into the child envelope; the id tag links start/stop without model text."""
+    return "%s [lo-dispatch:%s]" % (CHILD_GOAL, dispatch_id)
+
+
+def extract_dispatch_id_from_goal(goal: str) -> Optional[str]:
+    match = DISPATCH_TAG_RE.search(str(goal or ""))
+    return match.group(1) if match else None
+
+
+def _dispatch_child(
+    *,
+    repo: str,
+    brief_text: str,
+    workdir: str,
+    data_dir: str,
+    task_bytes: bytes,
+    task_text: str,
+    task_sha: str,
+    brief_sha: str,
+    profile_name: str,
+    gate: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """PASS hermes_child / claude_subagent: same ledger + run dir as CLI, sealed payload (FR-012)."""
+    led_path = ledger_mod.ledger_path(data_dir)
+    seq = ledger_mod.sequence_number(led_path)
+    dispatch_id = make_dispatch_id(task_bytes, workdir, HERMES_CHILD, seq)
+    run_dir = os.path.join(data_dir, "runs", dispatch_id)
+    os.makedirs(run_dir, exist_ok=True)
+
+    task_file = os.path.join(run_dir, "TASK.md")
+    with open(task_file, "wb") as fh:
+        fh.write(task_bytes)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+    # BRIEF.md so orch_accept can re-run the gate without the orchestrator (FR-014 / INV-009).
+    brief_file = os.path.join(run_dir, "BRIEF.md")
+    with open(brief_file, "wb") as fh:
+        fh.write(brief_text.encode("utf-8"))
+        fh.flush()
+        os.fsync(fh.fileno())
+
+    # DB-5: capture git base atomically into the dispatched ledger event.
+    base = capture_git_base(workdir)
+    base_head = base.get("base_head")
+    base_dirty = list(base.get("base_dirty") or [])
+
+    # Host identity for reconcile: a new session must not end a child while this
+    # process still lives (shared plugin data dir across gateway/chat sessions).
+    host_pid = os.getpid()
+    host_started = ledger_mod.process_start_token(host_pid)
+
+    goal = child_goal_for_id(dispatch_id)
+    payload = {"goal": goal, "context": seal_context(goal, task_text)}
+
+    event = {
+        "event": "dispatched",
+        "id": dispatch_id,
+        "executor": HERMES_CHILD,
+        "workdir": workdir,
+        "repo": os.path.abspath(repo),
+        "brief_sha256": brief_sha,
+        "task_sha256": task_sha,
+        "run_dir": run_dir,
+        "profile": profile_name,
+        "seq": seq,
+        "base_head": base_head,
+        "base_dirty": base_dirty,
+        "host_pid": host_pid,
+        "host_started": host_started,
+    }
+    ledger_mod.append_event(led_path, event)
+
+    child_out: Dict[str, Any] = {
+        "ok": True,
+        "decision": "PASS",
+        "reasons": [],
+        "id": dispatch_id,
+        "executor": HERMES_CHILD,
+        "profile": profile_name,
+        "run_dir": run_dir,
+        "delegate_task": payload,
+        "gate": gate,
+        "task_sha256": task_sha,
+        "brief_sha256": brief_sha,
+        "base_head": base_head,
+    }
+    if gate.get("gate_disabled"):
+        child_out["gate_disabled"] = True
+    return child_out
 
 
 def _expand_argv(template: Sequence[str], *, task_file: str, workdir: str, receipt: str) -> List[str]:
@@ -320,6 +409,8 @@ def reconcile(data_dir: str) -> List[Dict[str, Any]]:
     """Reconcile open dispatches after restart (FR-017 / JOB-3).
 
     For each ``dispatched`` without ``ended``:
+    - child executor → keep open while ``host_pid``/``host_started`` still name the
+      live dispatching process; otherwise ``ended`` with ``evidence: host_restarted``
     - ``exit.json`` present → record ``ended``
     - supervisor pid alive → keep watching
     - neither → ``ended`` with ``rc: null``; ``evidence: supervisor_exited`` when
@@ -330,6 +421,54 @@ def reconcile(data_dir: str) -> List[Dict[str, Any]]:
     for ev in ledger_mod.open_dispatches(led):
         dispatch_id = str(ev.get("id") or "")
         run_dir = str(ev.get("run_dir") or os.path.join(data_dir, "runs", dispatch_id))
+        # Children share the plugin data dir across sessions; only end when the
+        # dispatching host process is gone (or its PID was reused) — FR-012.
+        if str(ev.get("executor") or "") == HERMES_CHILD:
+            host_pid = ev.get("host_pid")
+            if isinstance(host_pid, str) and host_pid.isdigit():
+                host_pid = int(host_pid)
+            if ledger_mod.host_process_alive(
+                host_pid if isinstance(host_pid, int) else None,
+                ev.get("host_started") if isinstance(ev.get("host_started"), str) else None,
+            ):
+                actions.append(
+                    {
+                        "event": "watching",
+                        "id": dispatch_id,
+                        "host_pid": host_pid,
+                    }
+                )
+                continue
+            evidence = "host_restarted"
+            ended = {
+                "event": "ended",
+                "id": dispatch_id,
+                "executor": HERMES_CHILD,
+                "workdir": ev.get("workdir"),
+                "brief_sha256": ev.get("brief_sha256"),
+                "task_sha256": ev.get("task_sha256"),
+                "run_dir": run_dir,
+                "rc": None,
+                "seconds": None,
+                "timed_out": False,
+                "receipt_present": os.path.isfile(os.path.join(run_dir, "RECEIPT.md")),
+                "ended": "",
+                "evidence": evidence,
+                "child_status": "host_restarted",
+                "host_pid": host_pid,
+            }
+            ledger_mod.append_event(led, ended)
+            ledger_mod.append_event(
+                led,
+                {
+                    "event": "reconciled",
+                    "id": dispatch_id,
+                    "evidence": evidence,
+                    "run_dir": run_dir,
+                },
+            )
+            actions.append(ended)
+            continue
         exit_info = ledger_mod.read_exit_json(run_dir)
         pid = ev.get("pid")
         if exit_info is not None:
@@ -418,7 +557,22 @@ def reconcile(data_dir: str) -> List[Dict[str, Any]]:
 
 
 def format_completion_line(ended: Mapping[str, Any]) -> str:
-    """One-line completion message for inject_message (DECISION 6)."""
+    """One-line completion message for inject_message (DECISION 6 / FR-012 child stop)."""
+    evidence = str(ended.get("evidence") or "")
+    if evidence in ("subagent_stop", "host_restarted") or "child_status" in ended:
+        status = ended.get("child_status")
+        if status is None or status == "":
+            status = evidence or "-"
+        return (
+            "orch_dispatch ended id=%s executor=%s status=%s seconds=%s run_dir=%s"
+            % (
+                ended.get("id"),
+                ended.get("executor"),
+                status,
+                ended.get("seconds"),
+                ended.get("run_dir"),
+            )
+        )
     line = (
         "orch_dispatch ended id=%s executor=%s rc=%s seconds=%s receipt=%s run_dir=%s"
         % (
@@ -430,7 +584,7 @@ def format_completion_line(ended: Mapping[str, Any]) -> str:
             ended.get("run_dir"),
         )
     )
-    if ended.get("evidence") == "supervisor_exited" or "supervisor_rc" in ended:
+    if evidence == "supervisor_exited" or "supervisor_rc" in ended:
         run_dir = str(ended.get("run_dir") or "")
         line = "%s supervisor_rc=%s see %s/supervisor.log" % (
             line,

@@ -87,8 +87,8 @@ lives in the project's `.devframework/project.json`.
 |---|---|
 | `orch_gate` | Dry run: will this brief pass, and what will be delivered? |
 | `orch_dispatch` | Start a configured executor, or get a sealed payload for a Hermes child |
-| `orch_accept` | After the completion message: accept or reject by code |
-| `/orch` | Gate state, last dispatches, counters |
+| `orch_accept` | After the completion message (CLI or child): accept or reject by code |
+| `/orch` | Gate state, last dispatches (incl. children), counters |
 
 The plugin ships the skill `lean-orchestration:lean-orchestration` with the same rules for the orchestrating
 model. A CLI with the same core is available for scripts: `python3 cli.py gate | task | dispatch | accept`.
@@ -99,6 +99,28 @@ model. A CLI with the same core is available for scripts: `python3 cli.py gate |
 - Known errors that are neither cited nor linked to a rule reach the executor only as titles. Linking old entries
   with a `**Rules:**` line is up to the project.
 - Completion messages arrive when the orchestrating session is free to receive them; a long turn delays them.
+
+## Claude Code
+
+The same directory is also a Claude Code plugin (`.claude-plugin/plugin.json`). It needs `python3` on `PATH`
+(3.9+, standard library only).
+
+```bash
+claude --plugin-dir /path/to/lean-orchestration
+```
+
+| Hermes | Claude Code |
+|---|---|
+| tools `orch_gate`, `orch_dispatch`, `orch_accept` | the same tools from the plugin's MCP server `lo`; the brief text goes straight into `brief` |
+| `pre_tool_call` on `terminal` | `PreToolUse` on `Bash`: a configured executor or launcher started outside the door is denied |
+| `hermes_child` + `delegate_task` envelope | `executor="claude_subagent"` returns a sealed `agent` payload; `PreToolUse` on `Agent` denies a writing subagent without it. Read-only types (`Explore`, `Plan`, `claude-code-guide`) pass; change the list with `delegate_exempt_types` |
+| completion message | a background `PostToolUse` hook (`asyncRewake`) wakes the session with `orch_dispatch ended id=…` |
+| restart reconcile | `SessionStart` reports dispatches that ended while no session was open |
+| `/orch` | `/lean-orchestration:orch` |
+
+Configuration is `config.json` in the plugin data directory (`~/.claude/plugins/data/<plugin-id>/`). It holds the
+`settings` object from the Hermes example, written as JSON. Set `"delegate_guard": "off"` there to allow every
+subagent.
 
 ## Bundled variant
 

@@ -100,7 +100,7 @@ def merge_config(overrides: Optional[Mapping[str, Any]] = None) -> Dict[str, Any
 def load_config_file(path: str) -> Dict[str, Any]:
     """Load config JSON from path (UTF-8). Missing/invalid → clear error (CFG-2, CFG-5)."""
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             raw = json.load(fh)
     except FileNotFoundError as exc:
         raise ValueError("config file not found: %s" % path) from exc

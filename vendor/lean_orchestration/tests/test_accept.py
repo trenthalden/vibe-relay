@@ -23,7 +23,7 @@ from tests.fixtures import base_brief, make_fixture, write_brief
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CLI = str(REPO_ROOT / "cli.py")
 FAKE_EXEC = str(REPO_ROOT / "tests" / "fake_executor.py")
-PY39 = "/usr/bin/python3"
+PY39 = "/usr/bin/python3" if os.path.isfile("/usr/bin/python3") else sys.executable
 ALLOWED_FILE = "app/Sources/AppCore/Run/Timer.swift"
 OUTSIDE_FILE = "Outside/NotAllowed.swift"
 

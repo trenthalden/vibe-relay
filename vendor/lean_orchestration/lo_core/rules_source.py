@@ -222,7 +222,7 @@ def _from_rules_json(
 ) -> Dict[str, Any]:
     path = os.path.join(repo, ".lean-orchestration", "rules.json")
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             raw = fh.read()
     except OSError as exc:
         raise RulesSourceError("rules_json_unreadable", "cannot read %s: %s" % (path, exc)) from exc
@@ -364,7 +364,7 @@ def _ke_item(item: Mapping[str, Any], *, score: float) -> Dict[str, Any]:
 
 def _ids_from_rules_json(repo: str, ids: Sequence[str]) -> Dict[str, Any]:
     path = os.path.join(repo, ".lean-orchestration", "rules.json")
-    with open(path, "r", encoding="utf-8") as fh:
+    with open(path, "r", encoding="utf-8-sig") as fh:
         obj = json.load(fh)
     known_ids = set()
     for row in obj.get("rows") or []:

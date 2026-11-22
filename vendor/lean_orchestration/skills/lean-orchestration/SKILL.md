@@ -17,8 +17,8 @@ yourself and do not launch the executor from a terminal.
 |---|---|
 | `orch_gate` | Dry-run: will this brief PASS? What rules/KEs would be delivered? |
 | `orch_dispatch` | Start a configured CLI executor, or get a sealed `hermes_child` payload |
-| `orch_accept` | After the executor finishes: accept by code (paths, gate, probes) |
-| `/orch` | Coverage: gate on/off, last dispatches, accept counters |
+| `orch_accept` | After the executor finishes (CLI or child): accept by code (paths, gate, probes) |
+| `/orch` | Coverage: gate on/off, last dispatches (incl. children), accept counters |
 
 ## Brief sections (profile `code`)
 
@@ -48,7 +48,9 @@ Profile `research` needs only `INTENT` + `FORBIDDEN` (selected by the call argum
 
 `orch_accept(dispatch_id)` checks: changed paths ⊆ ALLOWED, a fresh gate PASS bound to
 the tree hash of the changed set, and probes from `.lean-orchestration/probes.json`.
-The executor's receipt is a self-report — never the acceptance decision.
+Use it for CLI executors and for children (`hermes_child` / `claude_subagent`) — both
+return a real dispatch id on PASS. The executor's receipt is a self-report — never the
+acceptance decision.
 
 ## Config-only disable
 
@@ -60,3 +62,18 @@ A brief line or tool argument saying `gate_enabled: false` has **no** effect.
 - Do not run `cursor-agent` / configured binaries from the terminal to skip the door.
 - Do not edit `TASK.md` and re-launch outside `orch_dispatch`.
 - Do not claim acceptance from a receipt alone — call `orch_accept`.
+
+## Claude Code host
+
+The same tools arrive as `mcp__plugin_lean-orchestration_lo__orch_gate` / `…orch_dispatch` /
+`…orch_accept`; pass the brief text directly in `brief` (no file needed).
+
+- `executor="claude_subagent"` replaces `hermes_child`: the result carries `agent`; call the
+  `Agent` tool with `agent.subagent_type`, `agent.description` and `agent.prompt` **unchanged**.
+  A `PreToolUse` hook refuses any other writing subagent (no envelope, or an edited prompt).
+  Read-only types (`Explore`, `Plan`, `claude-code-guide`; config `delegate_exempt_types`) pass.
+- A `Bash` command that starts a configured executor or launcher is refused, as `terminal` is in Hermes.
+- After a CLI dispatch, do not poll: a background hook wakes the session with
+  `orch_dispatch ended id=…`; then call `orch_accept(dispatch_id=…)`.
+- Config: `${CLAUDE_PLUGIN_DATA}/config.json` (the `settings` object of the Hermes example, as JSON).
+- Coverage: `/lean-orchestration:orch`.
