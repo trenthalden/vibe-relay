@@ -40,7 +40,7 @@ category: automation
 requires_hermes: ">=0.22.5"
 docs_url: https://github.com/trenthalden/vibe-relay#readme
 version: "0.5.0"
-platforms: [linux, macos]
+platforms: [linux, macos, windows]
 capabilities:
   provides_tools:
     - vibe_accept

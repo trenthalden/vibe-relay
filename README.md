@@ -168,6 +168,29 @@ vibe_night_log …              # queue rows, decisions taken without the owner,
 
 Every Hermes internal beyond the live `PluginContext` (`ctx.get_config`, `ctx.session_cwd`, `ctx.register_delegation_provider`, hooks/tools) is reached only through `hermes_compat.py`. That module wraps top-level config reads (`delegation` / `cron` / `model` — CFG-1: not plugin settings), session cwd, cron session env, `fetch_account_usage`, the delegation ABC, and `plugin_data_dir`. A missing host capability is named and logged once; it is never silently replaced by a default. Product modules and scripts must not `import` / `from` `hermes_cli`, `agent`, `gateway`, … directly — a unit test greps for that.
 
+## Platforms
+
+Linux, macOS and native Windows (Hermes Desktop or CLI). CI runs on all three (`.github/workflows/ci.yml`): the full test
+suite including the vendored DEV Framework and lean-orchestration suites, `hermes plugins validate` on the Hermes locked
+runtime (`v0.23.3`), and Hermes' own Windows footgun scanner over the production code.
+
+What is different on Windows:
+
+- A timed-out executor is stopped together with its child processes (`psutil` when available, otherwise `taskkill /T`,
+  then `/F` after the grace period). Process liveness never uses `os.kill(pid, 0)`, which on Windows sends Ctrl+C to the
+  whole console.
+- JSON and text state files are read BOM-tolerant (files touched by PowerShell or Notepad still load); state writes retry
+  briefly when an antivirus or indexer holds the file.
+- `df_init` also refuses `%USERPROFILE%\AppData`, drive roots and UNC share roots.
+
+Windows limitations:
+
+- Executor-lane enforcement recognises the POSIX shell write shapes listed above (`sed -i`, `>`/`>>`, `tee`). Hermes'
+  terminal on Windows is Git Bash, so these apply, but PowerShell writers called from it (`Set-Content`, `Out-File`) are
+  not detected.
+- Night-shift wakes run only while Hermes Desktop or the gateway is running and the PC is awake; a one-shot job missed
+  during sleep or hibernation is skipped.
+
 ## Data & network disclosure / security
 
 - **Network:** only through `hermes_compat.fetch_account_usage` → Hermes public `agent.account_usage.fetch_account_usage(provider, read_only=True)` (usable snapshots cached ≤ 180 s under plugin storage; empty/failed fetches use a **15 s negative TTL** so a brief miss after `state.json` wipe does not lock out stop/routing for a full TTL). No private `account_usage_cache` import, no direct credential file reads, no xAI/grok-cli paths.
@@ -175,9 +198,9 @@ Every Hermes internal beyond the live `PluginContext` (`ctx.get_config`, `ctx.se
 - **Cron loop guard:** park/auto-park will not call `cronjob_manage` when `HERMES_CRON_SESSION` is set unless `cron.allow_agent_scheduling` is true (core’s loop-prevention gate); the stop block still applies and says no resume timer was set because this is a scheduled run.
 - **Reads outside plugin data:** acceptance runs read-only `git status` / `diff` / `ls-files` child processes on the working tree (default cwd = session terminal cwd via `hermes_compat.resolve_agent_cwd` / `ctx.session_cwd`); optional handoff write under the target repo’s `docs/` (slug-confined).
 - **Local child processes:**
-  - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree), **`$HOME` itself**, **filesystem root (`/`)**, and protected `$HOME` dot-folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`).
+  - `df_init` runs the **plugin’s** vendored installer (`vendor/dev_framework/scripts/install.py`) as an isolated Python child (`python -I -B`). It writes framework files only into an allowed target: a git work tree, or the session working directory / a path under it. It **refuses** `hermes_constants.get_hermes_home()` (and its subtree), **`$HOME` itself**, **filesystem root (`/`) and Windows drive / UNC share roots**, and protected home folders (`.ssh`, `.aws`, `.config`, `.gnupg`, `.kube`, `.docker`, `AppData`).
   - `df_nav` runs the **plugin’s** vendored `template/.devframework/navigate.py` with `--root <target>` (cwd = that vendored folder, `python -I -B`). It does **not** execute the target repo’s `.devframework/navigate.py`.
-  - Child env for those DF tool processes is scrubbed to: `PATH`, `HOME`, `LANG`/`LC_*`, `SYSTEMROOT` (Windows), `PYTHONDONTWRITEBYTECODE`. No parent `*_API_KEY` / secrets; `GH_TOKEN` is not passed (the optional `gh` visibility check is only in target `devlog`/`check` when the agent runs them via `terminal`).
+  - Child env for those DF tool processes is scrubbed to: `PATH`, `HOME`, `LANG`/`LC_*`, `PYTHONDONTWRITEBYTECODE`, and on Windows the home, temp and system locations Python needs (`USERPROFILE`, `HOMEDRIVE`, `HOMEPATH`, `TEMP`, `TMP`, `TMPDIR`, `APPDATA`, `LOCALAPPDATA`, `SYSTEMROOT`, `SYSTEMDRIVE`, `WINDIR`, `COMSPEC`, `PATHEXT`). No parent `*_API_KEY` / secrets; `GH_TOKEN` is not passed (the optional `gh` visibility check is only in target `devlog`/`check` when the agent runs them via `terminal`).
   - Template scripts copied into a target repo may call `git` (and `gh` for devlog visibility) only when the user or agent runs them.
 - **Shell / approvals:** does not bypass approvals. `df_check` returns the gate command for the agent to run via `terminal`. Park creates a cron job through `cronjob_manage` (normal tool path) except under the cron loop guard above. No YOLO / non-interactive shells.
 - **Stored data:** `$HERMES_HOME/plugin-data/vibe-relay/state.json` (quota cache, last gate as pass/fail + tree hash, pending park, last route metadata, night-shift metadata: directory, times, job ids, liveness stamp). Gate commands, gate output and task text are not persisted there. Night plan content (instructions, queue, decisions, report) is written only inside the working repository under `.vibe-relay/` (self-ignored).

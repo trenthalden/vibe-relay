@@ -2,6 +2,12 @@
 
 ## 0.5.0
 
+- **Native Windows:** CI on Linux, macOS and Windows (tests incl. vendored suites, `hermes plugins validate` on the Hermes
+  locked runtime, Hermes' Windows footgun scanner). BOM-tolerant reads, short retry when a state file is held, DF child
+  env with the Windows home/temp variables, `df_init` refuses `AppData`, drive and UNC roots; `.gitattributes` keeps LF so
+  the vendored sha256 pins hold on Windows checkouts. Vendored lean-orchestration re-pinned to `02dcbdb`+: Windows-safe
+  process liveness, executor tree stop via psutil / `taskkill`, start token without `ps`. Catalog platforms now include
+  `windows`.
 - **Scheme B — gate included:** vendors lean-orchestration 0.1.0 under `vendor/lean_orchestration/` (pin
   `vendor/lean_orchestration.SOURCE.json`) and registers `orch_gate` / `orch_dispatch` / `orch_accept`, `/orch`, the
   lean-orchestration skill, and its `pre_tool_call` / `on_session_start` hooks **only when** a standalone
