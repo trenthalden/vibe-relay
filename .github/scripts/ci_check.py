@@ -51,7 +51,7 @@ def main() -> int:
             print(f'=== {name}: exit={code}, {time.monotonic() - started:.2f}s ===', flush=True)
 
         run('tests', [sys.executable, '-m', 'unittest', 'discover', '-s', 'tests', '-v'])
-        run('validate', ['hermes', 'plugins', 'validate', '.', '--install-deps'])
+        run('validate', [sys.executable, '-m', 'hermes_cli.main', 'plugins', 'validate', '.'])
         try:
             scanner = workspace / 'scripts' / 'check-windows-footguns.py'
             scanner.parent.mkdir(parents=True, exist_ok=True)
